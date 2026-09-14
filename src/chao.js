@@ -138,10 +138,16 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // rebuilds the buffer from that cache each call (never compounds).
   const headGeo = head.geometry;
   const headOriginalPos = headGeo.attributes.position.array.slice();
+  // Spread ~66deg from center to each side dir, with a threshold whose
+  // selection-cone half-angle (~26deg at 0.9) is less than half that
+  // separation — the three cones provably don't overlap, so a strip of
+  // undisplaced surface survives between them instead of merging into one
+  // lump (round-2 review traced the previous merge to exactly this: cones
+  // ~30deg wide centered only ~43deg apart).
   const QUILL_DIRS = [
     new THREE.Vector3(0, 0.5, -0.87).normalize(),
-    new THREE.Vector3(-0.68, 0.45, -0.58).normalize(),
-    new THREE.Vector3(0.68, 0.45, -0.58).normalize(),
+    new THREE.Vector3(-0.85, 0.25, -0.35).normalize(),
+    new THREE.Vector3(0.85, 0.25, -0.35).normalize(),
   ];
   const HORN_DIRS = [
     new THREE.Vector3(-0.55, 0.72, 0.2).normalize(),
@@ -154,9 +160,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // rather than something merely untuned. Empty regions make applyHeadMorph
   // a no-op for cube heads.
   const canMorph = shape === 'sphere';
-  const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.86) : [];
+  const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.9) : [];
   const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.88) : [];
-  const mouthVerts = canMorph ? collectMorphRegion(headGeo, MOUTH_DIRS, 0.78) : [];
+  const mouthVerts = canMorph ? collectMorphRegion(headGeo, MOUTH_DIRS, 0.72) : [];
 
   function applyHeadMorph(speedT, fireT, waterT) {
     const pos = headGeo.attributes.position;
@@ -175,7 +181,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     };
     push(quillVerts, 0.26 * speedT); // pulled outward: swept-back hair spikes
     push(hornVerts, 0.21 * fireT); // pulled outward: small devil horns
-    push(mouthVerts, -0.15 * waterT); // pushed inward: a hint of an open mouth
+    push(mouthVerts, -0.19 * waterT); // pushed inward: a hint of an open mouth
 
     pos.needsUpdate = true;
     headGeo.computeVertexNormals();
