@@ -7,14 +7,12 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 // instead of swapping to a different mesh per "evolution".
 //
 // Two structural params control the base silhouette, separate from traits:
-//   age:   1 = a single primitive, no separate head/body yet — just a ball
-//          (rolls) or a rounded cube (flops over). 2 = the real two-part
-//          head+body silhouette appears, plus arms/legs. 3 = + wings.
-//   shape: 'sphere' | 'cube' — which primitive family body/head (or the
-//          age-1 solo blob) are built from. Ears are deliberately NOT part
-//          of the base body — per design, those (and other animal features)
-//          are meant to come from feeding animal-type items later, not from
-//          age/element state.
+//   age:   1 = a single primitive, no separate head/body yet — a ball that
+//          rocks side to side in place. 2 = the real two-part head+body
+//          silhouette appears, plus arms/legs. 3 = + wings (wings can also
+//          appear earlier via the fairy trait — see applyTraits).
+//   shape: 'sphere' | 'cube' — cube is shelved for now (not offered in the
+//          UI, see traits.js) but primitiveGeometry() still supports it.
 //
 // From age 2 on, proportions are deliberately chibi: the head is the
 // dominant mass and sits deep into the body (heavy overlap) so it reads as
@@ -23,16 +21,17 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 //
 // Design rule (per direct feedback): prefer deforming the ORIGINAL head
 // vertices over bolting on new prop meshes wherever the effect is plausibly
-// part of the head's own surface (quills, horns, a mouth). New meshes are
-// reserved for things that genuinely aren't part of the body — a held gem,
-// a floating flame, a leaf sprout. See headMorph below.
+// part of the head's own surface (quills, horns). New meshes are reserved
+// for things that genuinely aren't part of the body — a held gem, a
+// floating flame orb, thorn spikes — or where a distinct (e.g. darker)
+// accent color is needed that a shared-material vertex morph can't provide.
 
 const SOLO_RADIUS = 0.4; // age-1 single-primitive size
 const BODY_RADIUS = 0.3;
-const HEAD_RADIUS = 0.42;
+const HEAD_RADIUS = 0.38; // trimmed down from 0.42 — was reading "a bit too big"
 const BODY_Y = BODY_RADIUS * 0.85; // body center height; squash keeps its base near the ground
-const HEAD_Y = 0.6; // overlaps the body for a chibi read, but leaves the body's
-                     // sides/bottom clear so age-2 limbs have somewhere to attach
+const HEAD_Y = 0.58; // overlaps the body for a chibi read, but leaves the body's
+                      // sides/bottom clear so age-2 limbs have somewhere to attach
 
 function lowPolyMaterial(color, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -88,15 +87,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   const isSolo = age === 1;
 
   // --- body + head ---------------------------------------------------------
-  // Age 1: one primitive plays both roles (a ball or a rounded cube — no
-  // head/body split yet). Age 2+: the real two-part chibi silhouette.
-  let body, head, headTopY, chestY, chestZ, tailY, tailZ;
-  // Sphere heads get a denser icosahedron (detail 2, ~160 vertices vs. 42)
-  // specifically so the vertex morphs below have enough resolution to form
-  // distinct, legible bumps instead of one crude merged wedge — the body
-  // stays at detail 1 for contrast and to keep the poly budget down where
-  // fine detail isn't needed. Cube heads are excluded from morphing
-  // entirely (see collectMorphRegion calls below), so they stay detail 1.
+  let body, head, headTopY, chestY, chestZ, backY, backZ;
   const headDetail = shape === 'sphere' ? 2 : 1;
 
   if (isSolo) {
@@ -107,10 +98,10 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     body = solo;
     head = solo;
     headTopY = solo.position.y + SOLO_RADIUS;
-    chestY = solo.position.y - SOLO_RADIUS * 0.4; // low on the belly, clear of the face/eyes
+    chestY = solo.position.y - SOLO_RADIUS * 0.4;
     chestZ = SOLO_RADIUS * 0.85;
-    tailY = solo.position.y - SOLO_RADIUS * 0.25; // lower body, not literally ground level
-    tailZ = -SOLO_RADIUS * 0.9;
+    backY = solo.position.y;
+    backZ = -SOLO_RADIUS * 0.9;
   } else {
     const bodyMat = track(lowPolyMaterial(NEUTRAL_COLOR));
     const bodyMesh = new THREE.Mesh(track(primitiveGeometry(shape, BODY_RADIUS)), bodyMat);
@@ -128,41 +119,25 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     headTopY = HEAD_Y + HEAD_RADIUS;
     chestY = BODY_Y + 0.05;
     chestZ = BODY_RADIUS * 0.95;
-    tailY = BODY_Y - 0.05; // lower body, not literally at ground level — round-12
-                            // review found it too low to read as anything but a
-                            // pebble resting on the ground when combined with the
-                            // old mild elongation
-    tailZ = -BODY_RADIUS * 1.1;
+    backY = BODY_Y + 0.02;
+    backZ = -BODY_RADIUS * 1.05;
   }
 
-  // --- head vertex morphs: speed quills, fire horns, water mouth -----------
-  // All three pull/push a small patch of the head's OWN vertices instead of
-  // attaching a new mesh. Original positions are cached once; applyTraits()
-  // rebuilds the buffer from that cache each call (never compounds).
+  // --- head vertex morphs: speed quills, fire horns -------------------------
+  // Pull/push a patch of the head's OWN vertices instead of attaching a new
+  // mesh. Original positions are cached once; applyTraits() rebuilds the
+  // buffer from that cache each call (never compounds).
   const headGeo = head.geometry;
   const headOriginalPos = headGeo.attributes.position.array.slice();
-  // Spread ~66deg from center to each side dir, with a threshold whose
-  // selection-cone half-angle (~26deg at 0.9) is less than half that
-  // separation — the three cones provably don't overlap, so a strip of
-  // undisplaced surface survives between them instead of merging into one
-  // lump (round-2 review traced the previous merge to exactly this: cones
-  // ~30deg wide centered only ~43deg apart).
   const QUILL_DIRS = [
     new THREE.Vector3(0, 0.5, -0.87).normalize(),
     new THREE.Vector3(-0.85, 0.25, -0.35).normalize(),
     new THREE.Vector3(0.85, 0.25, -0.35).normalize(),
   ];
-  // Tight cluster + strong displacement, unlike the softer quill spread —
-  // horns need to read as a defined point ("ear-like"), not a smooth bump.
   const HORN_DIRS = [
     new THREE.Vector3(-0.5, 0.78, 0.15).normalize(),
     new THREE.Vector3(0.5, 0.78, 0.15).normalize(),
   ];
-  // Cube heads don't get morphed at all — collectMorphRegion's "direction
-  // from center" selection assumes a roughly spherical vertex distribution,
-  // and on a rounded box it produced a genuinely broken lopsided-egg result
-  // rather than something merely untuned. Empty regions make applyHeadMorph
-  // a no-op for cube heads.
   const canMorph = shape === 'sphere';
   const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.9) : [];
   const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.93) : [];
@@ -170,31 +145,20 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   function applyHeadMorph(speedT, fireT) {
     const pos = headGeo.attributes.position;
     pos.array.set(headOriginalPos);
-
     const push = (entries, amount) => {
       for (const { index, weight, normal } of entries) {
         const d = amount * weight;
-        pos.setXYZ(
-          index,
-          pos.getX(index) + normal.x * d,
-          pos.getY(index) + normal.y * d,
-          pos.getZ(index) + normal.z * d,
-        );
+        pos.setXYZ(index, pos.getX(index) + normal.x * d, pos.getY(index) + normal.y * d, pos.getZ(index) + normal.z * d);
       }
     };
-    push(quillVerts, 0.26 * speedT); // pulled outward: swept-back hair spikes
-    push(hornVerts, 0.32 * fireT); // pulled outward into a sharp point: devil horns
-
+    push(quillVerts, 0.26 * speedT);
+    push(hornVerts, 0.32 * fireT);
     pos.needsUpdate = true;
     headGeo.computeVertexNormals();
   }
 
   // --- eyes: smooth + glossy, contrasting with the faceted body -----------
-  // Children of `head` (not `group`) so they scale/move with it — keeps them
-  // pinned to the face surface if the head is ever non-uniformly scaled,
-  // instead of clipping into or floating off the mesh.
-  const eyeRadius = isSolo ? 0.075 : 0.08;
-  const eyeGeo = track(new THREE.SphereGeometry(eyeRadius, 12, 10));
+  const eyeGeo = track(new THREE.SphereGeometry(0.075, 12, 10));
   const eyeMat = track(new THREE.MeshStandardMaterial({ color: 0x171512, roughness: 0.25 }));
   const highlightGeo = track(new THREE.SphereGeometry(0.026, 8, 6));
   const highlightMat = track(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, emissive: 0x333333 }));
@@ -209,53 +173,24 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     head.add(eye);
     return eye;
   }
-  const eyeSpread = isSolo ? 0.16 : 0.17;
-  const eyeL = makeEye(-eyeSpread);
-  const eyeR = makeEye(eyeSpread);
+  const eyeL = makeEye(-0.16);
+  const eyeR = makeEye(0.16);
 
   // --- tail (present from age 1, a Chao staple) ----------------------------
-  // Same squashed-icosahedron blob family as the age-2+ limbs, but stretched
-  // MUCH further along its long axis (0.65/0.65/2.4, vs. the previous 1.3x)
-  // so it actually reads as a directional shape instead of a round-ish nub —
-  // round-12 review found the old mild elongation too subtle to look like
-  // anything but a pebble regardless of rotation. Mounted on the lower body
-  // ("the butt," not up near the head/body overlap zone).
-  //
-  // Rotation math: unrotated, the mesh's long axis (local +Z) points world
-  // +Z (forward/toward camera) — not up, not back. To swing that tip to
-  // "45deg up-and-back" (world direction ~(0, 0.71, -0.71)), solve
-  // (-sin(theta), cos(theta)) = (0.71, -0.71) for a rotation about X: that's
-  // theta = -135deg, not -45deg (a naive "45deg = pi/4" guess ignores that
-  // the unrotated pose already starts 90deg away from "up", at "forward").
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
   const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.09, 1)), tailMat);
   tail.scale.set(0.65, 0.65, 2.4);
-  tail.position.set(0, tailY, tailZ);
+  tail.position.set(0, backY - 0.05, backZ);
   tail.rotation.x = -Math.PI * 0.75;
   group.add(tail);
 
   // --- age 2+: arms and legs — soft embedded blobs, reaching forward -------
-  // Back to the squashed-icosahedron nub shape (the one that actually read
-  // as "cute" — capsules read as sausages, tapered cones/cylinders read as
-  // pointy/blocky). A blob has no natural "pointing" axis, so it needs no
-  // orienting rotation at all — that rotation is exactly what made the last
-  // version look "angled in too much." Held in a pivot Group at the
-  // shoulder/hip purely so update() can swing it for the running gait.
   const limbs = [];
   let armL, armR, legL, legR, legMeshL, legMeshR;
-  let armGeo, armOriginalPos, thornVerts;
   const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    // Both arm meshes share this one geometry (they're mirrored only by
-    // pivot position, not by flipping the mesh itself), so a vertex morph
-    // on it — see the nature "arm thorns" morph below — applies identically
-    // and symmetrically to both without needing a second copy.
-    armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
-    armOriginalPos = armGeo.attributes.position.array.slice();
-    // Detail 2 on the legs specifically — enough vertex resolution that the
-    // water-trait flipper flattening (see applyTraits) reads as a smooth
-    // paddle shape instead of a chunky faceted flare.
+    const armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
     const legGeo = track(new THREE.IcosahedronGeometry(0.13, 2));
 
     function makeLimb(geo, pivotPos, scale) {
@@ -276,77 +211,55 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     armL = armSideL.pivot; armR = armSideR.pivot;
     legL = legSideL.pivot; legR = legSideR.pivot;
     legMeshL = legSideL.mesh; legMeshR = legSideR.mesh;
-
-    // nature (part 2): small sharp thorns on the arms — a tight,
-    // high-displacement cluster (same recipe that made the fire horns read
-    // as sharp points rather than a blob). Round-12 review found the first
-    // attempt (pointing local -Z) invisible: since both arm meshes share
-    // one un-mirrored geometry, -Z is the direction back toward the torso
-    // for BOTH arms (they sit forward of body center), so the thorns were
-    // aimed into the body, not out into open space. Pointing mostly +Y
-    // (top of the arm) instead sidesteps the left/right mirroring problem
-    // entirely — "top of the arm" is the same visible surface for both
-    // sides regardless of which way each arm is offset in X — and is
-    // visible from front, 3/4, and back angles alike.
-    const THORN_DIRS = [
-      new THREE.Vector3(0, 0.95, 0.15).normalize(),
-      new THREE.Vector3(0.35, 0.85, 0.1).normalize(),
-      new THREE.Vector3(-0.35, 0.85, 0.1).normalize(),
-    ];
-    thornVerts = collectMorphRegion(armGeo, THORN_DIRS, 0.92);
   }
 
-  function applyArmMorph(natureT) {
-    if (!armGeo) return;
-    const pos = armGeo.attributes.position;
-    pos.array.set(armOriginalPos);
-    for (const { index, weight, normal } of thornVerts) {
-      const d = 0.07 * natureT * weight; // round-13 review: 0.13 exceeded the arm's own
-                                          // radius (0.12), reading as a blade from some
-                                          // angles instead of a consistent small thorn
-      pos.setXYZ(index, pos.getX(index) + normal.x * d, pos.getY(index) + normal.y * d, pos.getZ(index) + normal.z * d);
-    }
-    pos.needsUpdate = true;
-    armGeo.computeVertexNormals();
-  }
+  // --- age 3+ (or fairy trait, any age): wings -------------------------------
+  // Always built now — presence (opacity/scale) is driven in applyTraits by
+  // max(age>=3 ? 1 : 0, fairyTrait), so age-3 still guarantees wings as
+  // before, but the fairy trait can also grant them earlier, tinted pink.
+  const wingBaseColor = 0xeaf6ff;
+  const wingBaseEmissive = 0x8fc7e8;
+  const wingMat = track(new THREE.MeshStandardMaterial({
+    color: wingBaseColor,
+    flatShading: true,
+    transparent: true,
+    opacity: 0,
+    roughness: 0.3,
+    emissive: wingBaseEmissive,
+    emissiveIntensity: 0.25,
+  }));
+  const wingGeo = track(new THREE.ConeGeometry(0.22, 0.5, 3));
+  const wingL = new THREE.Mesh(wingGeo, wingMat);
+  const wingR = new THREE.Mesh(wingGeo, wingMat);
+  const wingTilt = 0.28;
+  wingL.position.set(-0.26, 0.36, -0.34);
+  wingR.position.set(0.26, 0.36, -0.34);
+  wingL.rotation.set(wingTilt, 0, Math.PI * 0.5);
+  wingR.rotation.set(wingTilt, 0, -Math.PI * 0.5);
+  wingL.scale.setScalar(0.01);
+  wingR.scale.setScalar(0.01);
+  group.add(wingL, wingR);
+  const wings = [wingL, wingR];
 
-  // --- age 3+: basic wings ---------------------------------------------------
-  // Own accent material (not the shared skin tint) and thick enough to read
-  // as a wing rather than a sliver, mounted clear of the head sphere so
-  // they don't read as spikes piercing the skull, oriented so the wide
-  // triangular face (not its thin edge) is what the front-3/4 camera sees.
-  let wings = [];
-  let wingTilt = 0;
-  if (age >= 3) {
-    const wingMat = track(new THREE.MeshStandardMaterial({
-      color: 0xeaf6ff,
-      flatShading: true,
-      transparent: true,
-      opacity: 0.85,
-      roughness: 0.3,
-      emissive: 0x8fc7e8,
-      emissiveIntensity: 0.25,
-    }));
-    const wingGeo = track(new THREE.ConeGeometry(0.22, 0.5, 3));
-
-    const wingL = new THREE.Mesh(wingGeo, wingMat);
-    const wingR = new THREE.Mesh(wingGeo, wingMat);
-    wingL.scale.z = 0.28;
-    wingR.scale.z = 0.28;
-    wingL.position.set(-0.26, 0.36, -0.34);
-    wingR.position.set(0.26, 0.36, -0.34);
-    wingTilt = 0.28; // base up/back tilt, layered with the idle flutter in update()
-    wingL.rotation.set(wingTilt, 0, Math.PI * 0.5);
-    wingR.rotation.set(wingTilt, 0, -Math.PI * 0.5);
-    group.add(wingL, wingR);
-    wings = [wingL, wingR];
-  }
-
-  // --- element accessories: still separate meshes for things that plausibly
-  // aren't part of the head's own surface --------------------------------
-  // fire: a two-tone flame anchored right at the head's surface (no gap).
+  // --- element accessories ---------------------------------------------------
+  // fire: a floating orb with a two-tone flame rising out of it — like an
+  // upside-down ice-cream cone (scoop/orb at the bottom, cone tip up)
+  // hovering just above the head, centered (previous version had a stray
+  // x-offset that read as "off-center").
   const flameGroup = new THREE.Group();
-  flameGroup.position.set(-0.06, headTopY - 0.06, 0.02);
+  const flameBaseY = headTopY + 0.14;
+  flameGroup.position.set(0, flameBaseY, 0);
+  const orbMat = track(new THREE.MeshStandardMaterial({
+    color: ELEMENT_INFO.fire.accent,
+    emissive: ELEMENT_INFO.fire.color,
+    emissiveIntensity: 0.8,
+    flatShading: true,
+    transparent: true,
+    opacity: 0,
+    roughness: 0.35,
+  }));
+  const orb = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.075, 1)), orbMat);
+  flameGroup.add(orb);
   const flameOuterMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.fire.color,
     emissive: ELEMENT_INFO.fire.color,
@@ -363,10 +276,10 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     transparent: true,
     opacity: 0,
   }));
-  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.08, 0.22, 6)), flameOuterMat);
-  flameOuter.position.y = 0.09;
-  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.045, 0.13, 6)), flameInnerMat);
-  flameInner.position.y = 0.13;
+  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.065, 0.2, 6)), flameOuterMat);
+  flameOuter.position.y = 0.1;
+  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.038, 0.12, 6)), flameInnerMat);
+  flameInner.position.y = 0.14;
   flameGroup.add(flameOuter, flameInner);
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
@@ -388,76 +301,118 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   gem.scale.setScalar(0.01);
   group.add(gem);
 
-  // nature (part 1): a small two-leaf sprout, not a single blade — one
-  // blade alone read as "not enough." Cone's local X/Y stay full-size (its
-  // front-view silhouette: a full-width triangle) and only local Z is
-  // flattened — Z is the camera's line-of-sight axis, so the *thin*
-  // dimension points away from the viewer and the *wide* dimension (X) is
-  // what actually reads on screen.
-  const leafMat = track(new THREE.MeshStandardMaterial({
-    color: ELEMENT_INFO.nature.color,
+  // nature: dark sharp thorn spikes — replaces both the old leaf sprout
+  // (user: "still dont like the little leaf ears") and the old top-of-arm
+  // vertex-morph thorns (user: wrong side, invisible/clipping into the
+  // head). Real small meshes now, not a vertex morph, specifically because
+  // a darker accent color ("make the thorns a little darker so they pop")
+  // needs its own material — a shared-material vertex displacement can't
+  // differ in color from the skin it's part of.
+  const thornColor = new THREE.Color(ELEMENT_INFO.nature.color).multiplyScalar(0.45);
+  const thornMat = track(new THREE.MeshStandardMaterial({
+    color: thornColor,
+    emissive: thornColor,
+    emissiveIntensity: 0.15,
     flatShading: true,
     transparent: true,
     opacity: 0,
-    side: THREE.DoubleSide,
+    roughness: 0.6,
   }));
-  const leafBigGeo = track(new THREE.ConeGeometry(0.11, 0.26, 4));
-  const leafSmallGeo = track(new THREE.ConeGeometry(0.07, 0.17, 4));
-  const leaf = new THREE.Mesh(leafBigGeo, leafMat);
-  leaf.position.set(0.1, headTopY - 0.06, 0.03);
-  leaf.rotation.z = -0.32;
-  leaf.rotation.y = 0.4;
-  const leaf2 = new THREE.Mesh(leafSmallGeo, leafMat);
-  leaf2.position.set(-0.08, headTopY - 0.02, -0.05);
-  leaf2.rotation.z = 0.4;
-  leaf2.rotation.y = -0.5;
-  leaf.scale.set(1, 1, 0.22).multiplyScalar(0.01);
-  leaf2.scale.set(1, 1, 0.22).multiplyScalar(0.01);
-  group.add(leaf, leaf2);
+  const thornGeo = track(new THREE.ConeGeometry(0.032, 0.1, 5));
+  const thorns = [];
+  function makeThorn(parent, pos, rot, scale) {
+    const t = new THREE.Mesh(thornGeo, thornMat);
+    t.position.set(...pos);
+    t.rotation.set(...rot);
+    t.userData.baseScale = scale;
+    parent.add(t);
+    thorns.push(t);
+    return t;
+  }
+  // Spine: a small row of thorns up the back, each tilting a little further
+  // back than the last for a stegosaurus-plate rhythm.
+  const spineSpecs = [
+    { y: backY - 0.1, s: 0.75, tilt: -0.1 },
+    { y: backY + 0.04, s: 1, tilt: -0.3 },
+    { y: backY + 0.18, s: 0.85, tilt: -0.5 },
+  ];
+  for (const spec of spineSpecs) {
+    makeThorn(group, [0, spec.y, backZ], [spec.tilt, 0, 0], spec.s);
+  }
+  // Arms (age 2+ only): two thorns on the back of each arm, in the pivot so
+  // they inherit the running-gait swing.
+  if (age >= 2) {
+    for (const pivot of [armL, armR]) {
+      makeThorn(pivot, [0, 0.03, -0.1], [-Math.PI * 0.42, 0, 0], 0.85);
+      makeThorn(pivot, [0, -0.05, -0.09], [-Math.PI * 0.3, 0, 0], 0.7);
+    }
+  }
 
-  const skinMeshes = [body, head, tail, ...limbs, ...wings];
+  const skinMeshes = [body, head, tail, ...limbs, wingL, wingR];
+  const colorParts = isSolo
+    ? [{ mesh: body, delta: -0.05 }]
+    : [{ mesh: body, delta: 0.1 }, { mesh: head, delta: -0.3 }];
+  colorParts.push({ mesh: tail, delta: 0.15 });
+  for (const m of limbs) colorParts.push({ mesh: m, delta: 0.3 });
+
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
 
   function applyTraits(traits) {
-    const weights = ELEMENTS.map((el) => traits[el] ?? 0);
-    const total = weights.reduce((a, b) => a + b, 0);
+    // Top-2 weighted color blend: with many traits fed at once, averaging
+    // ALL of them muddies toward brown/gray. Instead, only the two highest
+    // trait values ever mix for the main body color (a 3rd+ trait shows as
+    // a small accent, not a full ingredient) — and different body parts
+    // lean toward primary or secondary by a different amount each, so the
+    // creature reads as a gradient between the two colors rather than one
+    // flat tint everywhere.
+    const entries = ELEMENTS.filter((el) => el !== 'fairy')
+      .map((el) => ({ el, v: traits[el] ?? 0 }))
+      .filter((e) => e.v > 0.001)
+      .sort((a, b) => b.v - a.v);
+    const total = entries.reduce((s, e) => s + e.v, 0);
+    const strength = Math.min(total, 1);
 
-    // Blend element colors by affinity; fall back to neutral when nothing fed yet.
-    const blended = new THREE.Color(NEUTRAL_COLOR);
-    if (total > 0.001) {
-      blended.setRGB(0, 0, 0);
-      for (const el of ELEMENTS) {
-        const w = (traits[el] ?? 0) / total;
-        if (w <= 0) continue;
-        blended.add(new THREE.Color(ELEMENT_INFO[el].color).multiplyScalar(w));
-      }
-      const strength = Math.min(total, 1);
-      blended.lerp(new THREE.Color(NEUTRAL_COLOR), 1 - strength);
+    const top1 = entries[0];
+    const top2 = entries[1];
+    const top3 = entries[2];
+    const primaryColor = top1 ? new THREE.Color(ELEMENT_INFO[top1.el].color) : new THREE.Color(NEUTRAL_COLOR);
+    const secondaryColor = top2 ? new THREE.Color(ELEMENT_INFO[top2.el].color) : primaryColor.clone();
+    const secondaryWeight = top1 && top2 ? top2.v / (top1.v + top2.v) : 0;
+    const accentColor = top3 ? new THREE.Color(ELEMENT_INFO[top3.el].color) : null;
+    const accentStrength = top3 ? Math.min(top3.v, 0.4) : 0;
+    const neutral = new THREE.Color(NEUTRAL_COLOR);
+
+    function partColor(delta) {
+      const t = THREE.MathUtils.clamp(secondaryWeight + delta, 0, 1);
+      const c = primaryColor.clone().lerp(secondaryColor, t);
+      c.lerp(neutral, 1 - strength);
+      if (accentColor) c.lerp(accentColor, accentStrength * 0.5);
+      return c;
     }
 
-    for (const m of skinMeshes) {
-      m.material.color.copy(blended);
-      m.material.emissive.copy(blended);
-      m.material.emissiveIntensity = Math.min(total, 1) * 0.3;
+    for (const { mesh, delta } of colorParts) {
+      const c = partColor(delta);
+      mesh.material.color.copy(c);
+      mesh.material.emissive.copy(c);
+      mesh.material.emissiveIntensity = strength * 0.3;
     }
 
     const fire = traits.fire ?? 0;
     const water = traits.water ?? 0;
     const nature = traits.nature ?? 0;
     const speed = traits.speed ?? 0;
+    const fairy = traits.fairy ?? 0;
 
-    // fire -> flame grows in, anchored at the head, AND small horns pull out
-    // of the head's own vertices near the temples.
+    // fire -> floating flame orb grows in, centered above the head, AND
+    // small horns pull out of the head's own vertices near the temples.
     const fireT = Math.min(fire * 1.2, 1);
+    orbMat.opacity = fireT;
     flameOuterMat.opacity = fireT;
     flameInnerMat.opacity = fireT;
     flameGroup.scale.setScalar(0.01 + fire * 1.1);
 
     // water -> wetter/glossier skin + a held gem fades in, AND (age 2+) the
-    // feet flatten and flare into webbed flippers. (A face-vertex "mouth"
-    // dimple was tried here first but read as the chest caving in, since at
-    // age 1 the head IS the whole body — flippers avoid that entirely by
-    // reshaping a limb that already only exists once there's a real body.)
+    // feet flatten and flare into webbed flippers.
     for (const m of skinMeshes) {
       m.material.roughness = 0.7 - water * 0.55;
       m.material.metalness = 0.05 + water * 0.25;
@@ -470,39 +425,37 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       legMeshR.scale.set(sx * (1 + water * 0.55), sy * (1 - water * 0.4), sz * (1 + water * 0.7));
     }
 
-    // nature -> two-leaf sprout grows in, AND (age 2+) small sharp thorns
-    // pull out of the arms' own back-facing vertices.
-    leafMat.opacity = nature;
-    leaf.scale.set(1, 1, 0.22).multiplyScalar(0.01 + nature * 1.1);
-    leaf2.scale.set(1, 1, 0.22).multiplyScalar(0.01 + nature * 1.1);
-    applyArmMorph(nature);
+    // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
+    thornMat.opacity = Math.min(nature * 1.2, 1);
+    for (const th of thorns) th.scale.setScalar(0.01 + nature * (th.userData.baseScale ?? 1));
 
     // speed -> the head's own vertices at the back/crown pull outward into
     // swept quills (Sonic/Shadow-style) instead of a separate mesh.
     applyHeadMorph(speed, fire);
+
+    // fairy -> wings (also guaranteed present at age 3+ regardless of this
+    // trait), tinted pink as the trait grows.
+    const wingPresence = Math.max(age >= 3 ? 1 : 0, fairy);
+    wingMat.opacity = 0.85 * wingPresence;
+    const wingScale = 0.02 + wingPresence * 0.98;
+    wingL.scale.set(wingScale, wingScale, 0.28 * wingScale);
+    wingR.scale.set(wingScale, wingScale, 0.28 * wingScale);
+    wingMat.color.set(wingBaseColor).lerp(new THREE.Color(ELEMENT_INFO.fairy.color), fairy);
+    wingMat.emissive.set(wingBaseEmissive).lerp(new THREE.Color(ELEMENT_INFO.fairy.accent), fairy);
   }
 
   function update(dt, t) {
     if (isSolo) {
-      if (shape === 'sphere') {
-        // rolling: rocks back and forth in place, rotation tied to the same
-        // phase as the position sway so it reads as true rolling (not a
-        // free spin that would turn the face away from camera most of the
-        // time — capped well under a full turn so the eyes stay legible).
-        const rollPhase = t * 0.9;
-        group.position.x = Math.sin(rollPhase) * 0.16;
-        body.rotation.x = Math.sin(rollPhase) * 0.18;
-        group.position.y = Math.abs(Math.sin(rollPhase * 2)) * 0.015;
-        group.rotation.y = 0;
-      } else {
-        // flopping cube: rock side to side, dipping/squashing at each "landing"
-        const flopPhase = t * 1.15;
-        group.rotation.z = Math.sin(flopPhase) * 0.55;
-        const landing = Math.pow(Math.abs(Math.sin(flopPhase)), 8);
-        group.scale.y = 1 - landing * 0.14;
-        group.position.y = -landing * 0.018;
-        group.position.x = 0;
-      }
+      // Rocks side to side in place with a squash on each "landing" — this
+      // was the cube's flop animation; the cube shape itself is shelved for
+      // now, but the motion reads well for the sphere too and was simpler
+      // to reason about than the old front-back roll.
+      const rockPhase = t * 1.15;
+      group.rotation.z = Math.sin(rockPhase) * 0.55;
+      const landing = Math.pow(Math.abs(Math.sin(rockPhase)), 8);
+      group.scale.y = 1 - landing * 0.14;
+      group.position.y = -landing * 0.018;
+      group.position.x = 0;
     } else {
       // idle bob
       group.position.y = Math.sin(t * 1.6) * 0.035;
@@ -531,20 +484,21 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       }
     }
 
-    // fire flame: gentle flicker (scale + emissive jitter), no bob offset
-    // needed now since it's anchored directly to the head.
+    // fire flame: gentle flicker + a slow float bob (it's a floating orb now,
+    // not anchored flush to the head).
     if (flameOuterMat.opacity > 0.01) {
       const flicker = 1 + Math.sin(t * 9) * 0.08;
-      flameGroup.children[0].scale.set(flicker, 1 + Math.sin(t * 7) * 0.12, flicker);
+      flameOuter.scale.set(flicker, 1 + Math.sin(t * 7) * 0.12, flicker);
       flameOuterMat.emissiveIntensity = 1 + Math.sin(t * 9) * 0.25;
       flameInnerMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
+      flameGroup.position.y = flameBaseY + Math.sin(t * 2.2) * 0.025;
     }
 
-    // wings: idle flutter (rotation.x — rotation.z holds the fixed outward mount angle)
-    if (wings.length) {
+    // wings: idle flutter
+    if (wingMat.opacity > 0.01) {
       const flap = Math.sin(t * 2.2) * 0.15;
-      wings[0].rotation.x = wingTilt + flap;
-      wings[1].rotation.x = wingTilt + flap;
+      wingL.rotation.x = wingTilt + flap;
+      wingR.rotation.x = wingTilt + flap;
     }
 
     // age 2+: running-in-place gait — legs swing, opposite arm swings with
@@ -569,7 +523,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     for (const obj of disposables) obj.dispose?.();
   }
 
-  applyTraits({ fire: 0, water: 0, nature: 0, speed: 0 });
+  applyTraits({ fire: 0, water: 0, nature: 0, speed: 0, fairy: 0 });
 
   return { group, applyTraits, update, dispose };
 }
