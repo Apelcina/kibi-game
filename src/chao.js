@@ -109,8 +109,8 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     headTopY = solo.position.y + SOLO_RADIUS;
     chestY = solo.position.y - SOLO_RADIUS * 0.4; // low on the belly, clear of the face/eyes
     chestZ = SOLO_RADIUS * 0.85;
-    tailY = solo.position.y - SOLO_RADIUS * 0.55; // low, near the "butt" not the crown
-    tailZ = -SOLO_RADIUS * 0.85;
+    tailY = solo.position.y - SOLO_RADIUS * 0.25; // lower body, not literally ground level
+    tailZ = -SOLO_RADIUS * 0.9;
   } else {
     const bodyMat = track(lowPolyMaterial(NEUTRAL_COLOR));
     const bodyMesh = new THREE.Mesh(track(primitiveGeometry(shape, BODY_RADIUS)), bodyMat);
@@ -128,9 +128,11 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     headTopY = HEAD_Y + HEAD_RADIUS;
     chestY = BODY_Y + 0.05;
     chestZ = BODY_RADIUS * 0.95;
-    tailY = BODY_Y - 0.14; // low, near the "butt" — was sitting up near the
-                            // head/body overlap zone and read as head-attached
-    tailZ = -BODY_RADIUS * 1.05;
+    tailY = BODY_Y - 0.05; // lower body, not literally at ground level — round-12
+                            // review found it too low to read as anything but a
+                            // pebble resting on the ground when combined with the
+                            // old mild elongation
+    tailZ = -BODY_RADIUS * 1.1;
   }
 
   // --- head vertex morphs: speed quills, fire horns, water mouth -----------
@@ -212,16 +214,24 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   const eyeR = makeEye(eyeSpread);
 
   // --- tail (present from age 1, a Chao staple) ----------------------------
-  // Same squashed-icosahedron blob family as the age-2+ limbs (stretched
-  // into a small teardrop via non-uniform scale) rather than a capsule.
-  // Mounted low, near the base of the body ("the butt," not the head/body
-  // overlap zone it used to sit in — that's why it read as head-attached),
-  // kicked up at ~45deg like a small perky tail.
+  // Same squashed-icosahedron blob family as the age-2+ limbs, but stretched
+  // MUCH further along its long axis (0.65/0.65/2.4, vs. the previous 1.3x)
+  // so it actually reads as a directional shape instead of a round-ish nub —
+  // round-12 review found the old mild elongation too subtle to look like
+  // anything but a pebble regardless of rotation. Mounted on the lower body
+  // ("the butt," not up near the head/body overlap zone).
+  //
+  // Rotation math: unrotated, the mesh's long axis (local +Z) points world
+  // +Z (forward/toward camera) — not up, not back. To swing that tip to
+  // "45deg up-and-back" (world direction ~(0, 0.71, -0.71)), solve
+  // (-sin(theta), cos(theta)) = (0.71, -0.71) for a rotation about X: that's
+  // theta = -135deg, not -45deg (a naive "45deg = pi/4" guess ignores that
+  // the unrotated pose already starts 90deg away from "up", at "forward").
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-  const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.1, 1)), tailMat);
-  tail.scale.set(0.85, 0.85, 1.3);
+  const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.09, 1)), tailMat);
+  tail.scale.set(0.65, 0.65, 2.4);
   tail.position.set(0, tailY, tailZ);
-  tail.rotation.x = -Math.PI * 0.25; // 45deg up-and-back
+  tail.rotation.x = -Math.PI * 0.75;
   group.add(tail);
 
   // --- age 2+: arms and legs — soft embedded blobs, reaching forward -------
@@ -267,16 +277,23 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     legL = legSideL.pivot; legR = legSideR.pivot;
     legMeshL = legSideL.mesh; legMeshR = legSideR.mesh;
 
-    // nature (part 2): small sharp thorns on the back of the arms — a
-    // tight, high-displacement cluster (same recipe that made the fire
-    // horns read as sharp points rather than a blob) instead of yet
-    // another smooth bump.
+    // nature (part 2): small sharp thorns on the arms — a tight,
+    // high-displacement cluster (same recipe that made the fire horns read
+    // as sharp points rather than a blob). Round-12 review found the first
+    // attempt (pointing local -Z) invisible: since both arm meshes share
+    // one un-mirrored geometry, -Z is the direction back toward the torso
+    // for BOTH arms (they sit forward of body center), so the thorns were
+    // aimed into the body, not out into open space. Pointing mostly +Y
+    // (top of the arm) instead sidesteps the left/right mirroring problem
+    // entirely — "top of the arm" is the same visible surface for both
+    // sides regardless of which way each arm is offset in X — and is
+    // visible from front, 3/4, and back angles alike.
     const THORN_DIRS = [
-      new THREE.Vector3(0, 0.15, -0.98).normalize(),
-      new THREE.Vector3(0.4, 0.35, -0.85).normalize(),
-      new THREE.Vector3(-0.4, 0.35, -0.85).normalize(),
+      new THREE.Vector3(0, 0.95, 0.15).normalize(),
+      new THREE.Vector3(0.35, 0.85, 0.1).normalize(),
+      new THREE.Vector3(-0.35, 0.85, 0.1).normalize(),
     ];
-    thornVerts = collectMorphRegion(armGeo, THORN_DIRS, 0.93);
+    thornVerts = collectMorphRegion(armGeo, THORN_DIRS, 0.92);
   }
 
   function applyArmMorph(natureT) {
