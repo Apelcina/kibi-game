@@ -105,40 +105,30 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   tail.rotation.x = Math.PI * 0.55;
   group.add(tail);
 
-  // --- age 2+: arms and legs, with a small "joint" sphere hiding the seam --
+  // --- age 2+: arms and legs as soft embedded nubs, not jointed rods -------
+  // A capsule-plus-ball-joint reads as a robot arm no matter how it's
+  // tuned — real chao limbs are just soft rounded paws/feet that look like
+  // they grew out of the body. So: single faceted blobs, squashed into a
+  // paw-ish shape, sunk deep enough into the body/head that there's no
+  // seam or joint to see — only the outer bump pokes out.
   const limbs = [];
-  const joints = [];
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const jointGeo = track(new THREE.SphereGeometry(0.1, 10, 8));
-    const armGeo = track(new THREE.CapsuleGeometry(0.06, 0.18, 4, 6));
-    const legGeo = track(new THREE.CapsuleGeometry(0.075, 0.2, 4, 6));
+    const armGeo = track(new THREE.IcosahedronGeometry(0.15, 1));
+    const legGeo = track(new THREE.IcosahedronGeometry(0.16, 1));
 
-    const shoulderY = 0.3;
-    const shoulderX = 0.37;
     for (const side of [-1, 1]) {
-      const joint = new THREE.Mesh(jointGeo, limbMat);
-      joint.position.set(shoulderX * side, shoulderY, 0.03);
-      group.add(joint);
-      joints.push(joint);
-
       const arm = new THREE.Mesh(armGeo, limbMat);
-      arm.position.set(shoulderX * side + 0.1 * side, shoulderY - 0.09, 0.03);
-      arm.rotation.z = Math.PI * 0.18 * side;
+      arm.position.set(0.24 * side, 0.26, 0.09);
+      arm.scale.set(1.2, 0.8, 0.95);
       group.add(arm);
       limbs.push(arm);
     }
 
-    const hipY = 0.09;
     for (const side of [-1, 1]) {
-      const joint = new THREE.Mesh(jointGeo.clone(), limbMat);
-      joint.scale.setScalar(0.85);
-      joint.position.set(0.27 * side, hipY, 0.04);
-      group.add(joint);
-      joints.push(joint);
-
       const leg = new THREE.Mesh(legGeo, limbMat);
-      leg.position.set(0.27 * side, hipY - 0.02, 0.04);
+      leg.position.set(0.15 * side, 0.05, 0.06);
+      leg.scale.set(1, 0.7, 1.1);
       group.add(leg);
       limbs.push(leg);
     }
@@ -248,7 +238,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   leaf.scale.multiplyScalar(0.01);
   group.add(leaf);
 
-  const skinMeshes = [body, head, tail, ...limbs, ...joints, ...wings];
+  const skinMeshes = [body, head, tail, ...limbs, ...wings];
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
 
   function applyTraits(traits) {
