@@ -149,11 +149,12 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     new THREE.Vector3(-0.85, 0.25, -0.35).normalize(),
     new THREE.Vector3(0.85, 0.25, -0.35).normalize(),
   ];
+  // Tight cluster + strong displacement, unlike the softer quill spread —
+  // horns need to read as a defined point ("ear-like"), not a smooth bump.
   const HORN_DIRS = [
-    new THREE.Vector3(-0.55, 0.72, 0.2).normalize(),
-    new THREE.Vector3(0.55, 0.72, 0.2).normalize(),
+    new THREE.Vector3(-0.5, 0.78, 0.15).normalize(),
+    new THREE.Vector3(0.5, 0.78, 0.15).normalize(),
   ];
-  const MOUTH_DIRS = [new THREE.Vector3(0, -0.3, 0.92).normalize()];
   // Cube heads don't get morphed at all — collectMorphRegion's "direction
   // from center" selection assumes a roughly spherical vertex distribution,
   // and on a rounded box it produced a genuinely broken lopsided-egg result
@@ -161,10 +162,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // a no-op for cube heads.
   const canMorph = shape === 'sphere';
   const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.9) : [];
-  const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.88) : [];
-  const mouthVerts = canMorph ? collectMorphRegion(headGeo, MOUTH_DIRS, 0.72) : [];
+  const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.93) : [];
 
-  function applyHeadMorph(speedT, fireT, waterT) {
+  function applyHeadMorph(speedT, fireT) {
     const pos = headGeo.attributes.position;
     pos.array.set(headOriginalPos);
 
@@ -180,8 +180,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       }
     };
     push(quillVerts, 0.26 * speedT); // pulled outward: swept-back hair spikes
-    push(hornVerts, 0.21 * fireT); // pulled outward: small devil horns
-    push(mouthVerts, -0.19 * waterT); // pushed inward: a hint of an open mouth
+    push(hornVerts, 0.32 * fireT); // pulled outward into a sharp point: devil horns
 
     pos.needsUpdate = true;
     headGeo.computeVertexNormals();
@@ -220,36 +219,42 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   tail.rotation.x = Math.PI * 0.55;
   group.add(tail);
 
-  // --- age 2+: arms and legs — smooth oblong, reaching forward -------------
-  // Capsules (rounded caps at both ends), not tapered cones/cylinders — a
-  // point or a flat cap both read as "blocky"/"weapon-like" per feedback.
-  // Held in a pivot Group at the shoulder/hip so update() can swing the limb
-  // from its joint without fighting the mesh's own fixed forward-reach tilt.
+  // --- age 2+: arms and legs — soft embedded blobs, reaching forward -------
+  // Back to the squashed-icosahedron nub shape (the one that actually read
+  // as "cute" — capsules read as sausages, tapered cones/cylinders read as
+  // pointy/blocky). A blob has no natural "pointing" axis, so it needs no
+  // orienting rotation at all — that rotation is exactly what made the last
+  // version look "angled in too much." Held in a pivot Group at the
+  // shoulder/hip purely so update() can swing it for the running gait.
   const limbs = [];
-  let armL, armR, legL, legR;
+  let armL, armR, legL, legR, legMeshL, legMeshR;
+  const LEG_BASE_SCALE = [1, 0.7, 1.1];
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const armGeo = track(new THREE.CapsuleGeometry(0.08, 0.3, 4, 8));
-    const legGeo = track(new THREE.CapsuleGeometry(0.09, 0.26, 4, 8));
+    const armGeo = track(new THREE.IcosahedronGeometry(0.15, 1));
+    // Detail 2 on the legs specifically — enough vertex resolution that the
+    // water-trait flipper flattening (see applyTraits) reads as a smooth
+    // paddle shape instead of a chunky faceted flare.
+    const legGeo = track(new THREE.IcosahedronGeometry(0.16, 2));
 
-    function makeLimb(geo, pivotPos, rot) {
+    function makeLimb(geo, pivotPos, scale) {
       const pivot = new THREE.Group();
       pivot.position.set(...pivotPos);
       const mesh = new THREE.Mesh(geo, limbMat);
-      mesh.rotation.set(...rot);
+      mesh.scale.set(...scale);
       pivot.add(mesh);
       group.add(pivot);
       limbs.push(mesh);
-      return pivot;
+      return { pivot, mesh };
     }
 
-    // Capsule's local height axis (Y) rotated ~90° about X points forward
-    // (+Z); a partial tilt keeps the base embedded in the body while the
-    // rounded far end reaches out ahead instead of just to the side.
-    armL = makeLimb(armGeo, [0.22, 0.27, 0.1], [Math.PI * 0.42, 0, 0.3]);
-    armR = makeLimb(armGeo, [-0.22, 0.27, 0.1], [Math.PI * 0.42, 0, -0.3]);
-    legL = makeLimb(legGeo, [0.15, 0.07, 0.08], [Math.PI * 0.4, 0, 0.15]);
-    legR = makeLimb(legGeo, [-0.15, 0.07, 0.08], [Math.PI * 0.4, 0, -0.15]);
+    const armSideL = makeLimb(armGeo, [0.24, 0.27, 0.15], [1.2, 0.8, 0.95]);
+    const armSideR = makeLimb(armGeo, [-0.24, 0.27, 0.15], [1.2, 0.8, 0.95]);
+    const legSideL = makeLimb(legGeo, [0.15, 0.06, 0.11], LEG_BASE_SCALE);
+    const legSideR = makeLimb(legGeo, [-0.15, 0.06, 0.11], LEG_BASE_SCALE);
+    armL = armSideL.pivot; armR = armSideR.pivot;
+    legL = legSideL.pivot; legR = legSideR.pivot;
+    legMeshL = legSideL.mesh; legMeshR = legSideR.mesh;
   }
 
   // --- age 3+: basic wings ---------------------------------------------------
@@ -387,14 +392,22 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     flameInnerMat.opacity = fireT;
     flameGroup.scale.setScalar(0.01 + fire * 1.1);
 
-    // water -> wetter/glossier skin + a held gem fades in, AND the head's
-    // own vertices dimple inward near the lower face — a hint of a mouth.
+    // water -> wetter/glossier skin + a held gem fades in, AND (age 2+) the
+    // feet flatten and flare into webbed flippers. (A face-vertex "mouth"
+    // dimple was tried here first but read as the chest caving in, since at
+    // age 1 the head IS the whole body — flippers avoid that entirely by
+    // reshaping a limb that already only exists once there's a real body.)
     for (const m of skinMeshes) {
       m.material.roughness = 0.7 - water * 0.55;
       m.material.metalness = 0.05 + water * 0.25;
     }
     gemMat.opacity = water;
     gem.scale.setScalar(0.01 + water * 1.1);
+    if (legMeshL) {
+      const [sx, sy, sz] = LEG_BASE_SCALE;
+      legMeshL.scale.set(sx * (1 + water * 0.55), sy * (1 - water * 0.4), sz * (1 + water * 0.7));
+      legMeshR.scale.set(sx * (1 + water * 0.55), sy * (1 - water * 0.4), sz * (1 + water * 0.7));
+    }
 
     // nature -> leaf blade grows in from nothing.
     leafMat.opacity = nature;
@@ -402,7 +415,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
 
     // speed -> the head's own vertices at the back/crown pull outward into
     // swept quills (Sonic/Shadow-style) instead of a separate mesh.
-    applyHeadMorph(speed, fire, water);
+    applyHeadMorph(speed, fire);
   }
 
   function update(dt, t) {
