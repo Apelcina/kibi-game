@@ -149,6 +149,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // as a wing rather than a sliver, mounted high on the back near the
   // shoulders so they're visible from a 3/4 front angle, not just from behind.
   let wings = [];
+  let wingTilt = 0;
   if (age >= 3) {
     const wingMat = track(new THREE.MeshStandardMaterial({
       color: 0xeaf6ff,
@@ -159,16 +160,23 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       emissive: 0x8fc7e8,
       emissiveIntensity: 0.25,
     }));
-    const wingGeo = track(new THREE.ConeGeometry(0.26, 0.5, 3));
+    // Cone's local height axis (Y) becomes the outward direction (world X)
+    // once rotated; local Z (flattened to 0.28) stays world Z, so the wing
+    // ends up long-and-tall in the screen plane but thin front-to-back —
+    // a blade, not a spike. Mount point is offset well clear of both the
+    // head sphere (center (0,HEAD_Y,0) r=HEAD_RADIUS) and body, so the base
+    // doesn't sit embedded inside either.
+    const wingGeo = track(new THREE.ConeGeometry(0.22, 0.5, 3));
 
     const wingL = new THREE.Mesh(wingGeo, wingMat);
     const wingR = new THREE.Mesh(wingGeo, wingMat);
-    wingL.scale.z = 0.32;
-    wingR.scale.z = 0.32;
-    wingL.position.set(-0.22, HEAD_Y + 0.05, -BODY_RADIUS * 0.7);
-    wingR.position.set(0.22, HEAD_Y + 0.05, -BODY_RADIUS * 0.7);
-    wingL.rotation.set(Math.PI * 0.42, 0, Math.PI * 0.4);
-    wingR.rotation.set(Math.PI * 0.42, 0, -Math.PI * 0.4);
+    wingL.scale.z = 0.28;
+    wingR.scale.z = 0.28;
+    wingL.position.set(-0.26, 0.36, -0.34);
+    wingR.position.set(0.26, 0.36, -0.34);
+    wingTilt = 0.28; // base up/back tilt, layered with the idle flutter in update()
+    wingL.rotation.set(wingTilt, 0, Math.PI * 0.5);
+    wingR.rotation.set(wingTilt, 0, -Math.PI * 0.5);
     group.add(wingL, wingR);
     wings = [wingL, wingR];
   }
@@ -201,23 +209,31 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
 
-  // water: a small held/worn gem — the readable prop the flat color tint was missing.
+  // water: a small held/worn gem — the readable prop the flat color tint was
+  // missing. Bright white-cyan + strong emissive so it pops against the
+  // water-blue-tinted skin instead of blending into it.
   const gemMat = track(new THREE.MeshStandardMaterial({
-    color: ELEMENT_INFO.water.accent,
-    emissive: ELEMENT_INFO.water.color,
-    emissiveIntensity: 0.5,
+    color: 0xffffff,
+    emissive: 0x8fe0ff,
+    emissiveIntensity: 0.9,
     roughness: 0.05,
-    metalness: 0.7,
+    metalness: 0.6,
     flatShading: true,
     transparent: true,
     opacity: 0,
   }));
-  const gem = new THREE.Mesh(track(new THREE.OctahedronGeometry(0.09, 0)), gemMat);
+  const gem = new THREE.Mesh(track(new THREE.OctahedronGeometry(0.11, 0)), gemMat);
   gem.position.set(0, BODY_Y + 0.05, BODY_RADIUS * 0.95);
   gem.scale.setScalar(0.01);
   group.add(gem);
 
-  // nature: a flattened leaf blade (not a horn) sprouting from the head.
+  // nature: a leaf blade sprouting from the head. The cone's local X/Y stay
+  // full-size (its front-view silhouette: a full-width triangle) and only
+  // local Z is flattened — Z is the camera's line-of-sight axis, so the
+  // *thin* dimension points away from the viewer and the *wide* dimension
+  // (X) is what actually reads on screen. (Round 1 flattened X instead,
+  // which thinned exactly the dimension the camera could see — that's why
+  // it read as a spike no matter the trait value.)
   const leafMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.nature.color,
     flatShading: true,
@@ -225,10 +241,10 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     opacity: 0,
     side: THREE.DoubleSide,
   }));
-  const leaf = new THREE.Mesh(track(new THREE.ConeGeometry(0.07, 0.2, 4)), leafMat);
+  const leaf = new THREE.Mesh(track(new THREE.ConeGeometry(0.08, 0.2, 4)), leafMat);
   leaf.position.set(0.09, headTopY - 0.05, 0);
-  leaf.rotation.z = -0.35;
-  leaf.scale.set(0.35, 1, 1);
+  leaf.rotation.z = -0.3;
+  leaf.scale.set(1, 1, 0.22);
   leaf.scale.multiplyScalar(0.01);
   group.add(leaf);
 
@@ -279,7 +295,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
 
     // nature -> leaf blade grows in from nothing.
     leafMat.opacity = nature;
-    leaf.scale.set(0.35, 1, 1).multiplyScalar(0.01 + nature * 1.1);
+    leaf.scale.set(1, 1, 0.22).multiplyScalar(0.01 + nature * 1.1);
 
     // speed -> aerodynamic: body/head stretch forward and taper. Eyes are
     // children of `head` so they stay pinned to its surface as it stretches.
@@ -323,11 +339,11 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       flameInnerMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
     }
 
-    // wings: idle flutter
+    // wings: idle flutter (rotation.x — rotation.z holds the fixed outward mount angle)
     if (wings.length) {
-      const flap = Math.sin(t * 2.2) * 0.12;
-      wings[0].rotation.z = Math.PI * 0.4 + flap;
-      wings[1].rotation.z = -Math.PI * 0.4 - flap;
+      const flap = Math.sin(t * 2.2) * 0.15;
+      wings[0].rotation.x = wingTilt + flap;
+      wings[1].rotation.x = wingTilt + flap;
     }
   }
 
