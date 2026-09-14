@@ -1,0 +1,72 @@
+:root {
+  color-scheme: light dark;
+  font: 16px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+#scene-root canvas {
+  display: block;
+}
+
+.trait-panel {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(20, 22, 18, 0.68);
+  backdrop-filter: blur(6px);
+  color: #f4f4f0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.trait-panel h1 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.trait-panel .hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.75;
+}
+
+.trait-row {
+  display: grid;
+  grid-template-columns: 14px 60px 1fr 38px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.trait-name {
+  font-size: 13px;
+}
+
+.trait-value {
+  font-size: 12px;
+  text-align: right;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='range'] {
+  width: 100%;
+}
