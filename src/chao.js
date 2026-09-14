@@ -109,8 +109,8 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     headTopY = solo.position.y + SOLO_RADIUS;
     chestY = solo.position.y - SOLO_RADIUS * 0.4; // low on the belly, clear of the face/eyes
     chestZ = SOLO_RADIUS * 0.85;
-    tailY = solo.position.y;
-    tailZ = -SOLO_RADIUS * 1.05;
+    tailY = solo.position.y - SOLO_RADIUS * 0.55; // low, near the "butt" not the crown
+    tailZ = -SOLO_RADIUS * 0.85;
   } else {
     const bodyMat = track(lowPolyMaterial(NEUTRAL_COLOR));
     const bodyMesh = new THREE.Mesh(track(primitiveGeometry(shape, BODY_RADIUS)), bodyMat);
@@ -128,8 +128,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     headTopY = HEAD_Y + HEAD_RADIUS;
     chestY = BODY_Y + 0.05;
     chestZ = BODY_RADIUS * 0.95;
-    tailY = BODY_Y + 0.02;
-    tailZ = -BODY_RADIUS * 1.3;
+    tailY = BODY_Y - 0.14; // low, near the "butt" — was sitting up near the
+                            // head/body overlap zone and read as head-attached
+    tailZ = -BODY_RADIUS * 1.05;
   }
 
   // --- head vertex morphs: speed quills, fire horns, water mouth -----------
@@ -212,14 +213,15 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
 
   // --- tail (present from age 1, a Chao staple) ----------------------------
   // Same squashed-icosahedron blob family as the age-2+ limbs (stretched
-  // into a small teardrop via non-uniform scale) rather than a capsule —
-  // round-10 review flagged the capsule as a visibly different "shape
-  // family" sitting right next to the blob limbs.
+  // into a small teardrop via non-uniform scale) rather than a capsule.
+  // Mounted low, near the base of the body ("the butt," not the head/body
+  // overlap zone it used to sit in — that's why it read as head-attached),
+  // kicked up at ~45deg like a small perky tail.
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-  const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.11, 1)), tailMat);
-  tail.scale.set(0.85, 0.85, 1.4);
+  const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.1, 1)), tailMat);
+  tail.scale.set(0.85, 0.85, 1.3);
   tail.position.set(0, tailY, tailZ);
-  tail.rotation.x = Math.PI * 0.55;
+  tail.rotation.x = -Math.PI * 0.25; // 45deg up-and-back
   group.add(tail);
 
   // --- age 2+: arms and legs — soft embedded blobs, reaching forward -------
@@ -231,14 +233,20 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // shoulder/hip purely so update() can swing it for the running gait.
   const limbs = [];
   let armL, armR, legL, legR, legMeshL, legMeshR;
-  const LEG_BASE_SCALE = [1, 0.7, 1.1];
+  let armGeo, armOriginalPos, thornVerts;
+  const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const armGeo = track(new THREE.IcosahedronGeometry(0.15, 1));
+    // Both arm meshes share this one geometry (they're mirrored only by
+    // pivot position, not by flipping the mesh itself), so a vertex morph
+    // on it — see the nature "arm thorns" morph below — applies identically
+    // and symmetrically to both without needing a second copy.
+    armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
+    armOriginalPos = armGeo.attributes.position.array.slice();
     // Detail 2 on the legs specifically — enough vertex resolution that the
     // water-trait flipper flattening (see applyTraits) reads as a smooth
     // paddle shape instead of a chunky faceted flare.
-    const legGeo = track(new THREE.IcosahedronGeometry(0.16, 2));
+    const legGeo = track(new THREE.IcosahedronGeometry(0.13, 2));
 
     function makeLimb(geo, pivotPos, scale) {
       const pivot = new THREE.Group();
@@ -251,13 +259,36 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       return { pivot, mesh };
     }
 
-    const armSideL = makeLimb(armGeo, [0.24, 0.27, 0.15], [1.2, 0.8, 0.95]);
-    const armSideR = makeLimb(armGeo, [-0.24, 0.27, 0.15], [1.2, 0.8, 0.95]);
-    const legSideL = makeLimb(legGeo, [0.15, 0.06, 0.11], LEG_BASE_SCALE);
-    const legSideR = makeLimb(legGeo, [-0.15, 0.06, 0.11], LEG_BASE_SCALE);
+    const armSideL = makeLimb(armGeo, [0.22, 0.27, 0.15], [1, 0.8, 0.95]);
+    const armSideR = makeLimb(armGeo, [-0.22, 0.27, 0.15], [1, 0.8, 0.95]);
+    const legSideL = makeLimb(legGeo, [0.14, 0.06, 0.11], LEG_BASE_SCALE);
+    const legSideR = makeLimb(legGeo, [-0.14, 0.06, 0.11], LEG_BASE_SCALE);
     armL = armSideL.pivot; armR = armSideR.pivot;
     legL = legSideL.pivot; legR = legSideR.pivot;
     legMeshL = legSideL.mesh; legMeshR = legSideR.mesh;
+
+    // nature (part 2): small sharp thorns on the back of the arms — a
+    // tight, high-displacement cluster (same recipe that made the fire
+    // horns read as sharp points rather than a blob) instead of yet
+    // another smooth bump.
+    const THORN_DIRS = [
+      new THREE.Vector3(0, 0.15, -0.98).normalize(),
+      new THREE.Vector3(0.4, 0.35, -0.85).normalize(),
+      new THREE.Vector3(-0.4, 0.35, -0.85).normalize(),
+    ];
+    thornVerts = collectMorphRegion(armGeo, THORN_DIRS, 0.93);
+  }
+
+  function applyArmMorph(natureT) {
+    if (!armGeo) return;
+    const pos = armGeo.attributes.position;
+    pos.array.set(armOriginalPos);
+    for (const { index, weight, normal } of thornVerts) {
+      const d = 0.13 * natureT * weight;
+      pos.setXYZ(index, pos.getX(index) + normal.x * d, pos.getY(index) + normal.y * d, pos.getZ(index) + normal.z * d);
+    }
+    pos.needsUpdate = true;
+    armGeo.computeVertexNormals();
   }
 
   // --- age 3+: basic wings ---------------------------------------------------
@@ -338,11 +369,12 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   gem.scale.setScalar(0.01);
   group.add(gem);
 
-  // nature: a leaf blade sprouting from the head. The cone's local X/Y stay
-  // full-size (its front-view silhouette: a full-width triangle) and only
-  // local Z is flattened — Z is the camera's line-of-sight axis, so the
-  // *thin* dimension points away from the viewer and the *wide* dimension
-  // (X) is what actually reads on screen.
+  // nature (part 1): a small two-leaf sprout, not a single blade — one
+  // blade alone read as "not enough." Cone's local X/Y stay full-size (its
+  // front-view silhouette: a full-width triangle) and only local Z is
+  // flattened — Z is the camera's line-of-sight axis, so the *thin*
+  // dimension points away from the viewer and the *wide* dimension (X) is
+  // what actually reads on screen.
   const leafMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.nature.color,
     flatShading: true,
@@ -350,12 +382,19 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     opacity: 0,
     side: THREE.DoubleSide,
   }));
-  const leaf = new THREE.Mesh(track(new THREE.ConeGeometry(0.08, 0.2, 4)), leafMat);
-  leaf.position.set(0.09, headTopY - 0.05, 0);
-  leaf.rotation.z = -0.3;
-  leaf.scale.set(1, 1, 0.22);
-  leaf.scale.multiplyScalar(0.01);
-  group.add(leaf);
+  const leafBigGeo = track(new THREE.ConeGeometry(0.11, 0.26, 4));
+  const leafSmallGeo = track(new THREE.ConeGeometry(0.07, 0.17, 4));
+  const leaf = new THREE.Mesh(leafBigGeo, leafMat);
+  leaf.position.set(0.1, headTopY - 0.06, 0.03);
+  leaf.rotation.z = -0.32;
+  leaf.rotation.y = 0.4;
+  const leaf2 = new THREE.Mesh(leafSmallGeo, leafMat);
+  leaf2.position.set(-0.08, headTopY - 0.02, -0.05);
+  leaf2.rotation.z = 0.4;
+  leaf2.rotation.y = -0.5;
+  leaf.scale.set(1, 1, 0.22).multiplyScalar(0.01);
+  leaf2.scale.set(1, 1, 0.22).multiplyScalar(0.01);
+  group.add(leaf, leaf2);
 
   const skinMeshes = [body, head, tail, ...limbs, ...wings];
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
@@ -412,9 +451,12 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       legMeshR.scale.set(sx * (1 + water * 0.55), sy * (1 - water * 0.4), sz * (1 + water * 0.7));
     }
 
-    // nature -> leaf blade grows in from nothing.
+    // nature -> two-leaf sprout grows in, AND (age 2+) small sharp thorns
+    // pull out of the arms' own back-facing vertices.
     leafMat.opacity = nature;
     leaf.scale.set(1, 1, 0.22).multiplyScalar(0.01 + nature * 1.1);
+    leaf2.scale.set(1, 1, 0.22).multiplyScalar(0.01 + nature * 1.1);
+    applyArmMorph(nature);
 
     // speed -> the head's own vertices at the back/crown pull outward into
     // swept quills (Sonic/Shadow-style) instead of a separate mesh.
