@@ -137,8 +137,11 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   let armL, armR, legL, legR;
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const armGeo = track(new THREE.ConeGeometry(0.1, 0.32, 6));
-    const legGeo = track(new THREE.ConeGeometry(0.11, 0.3, 6));
+    // Blunted taper (a small flat cap, not a true point) — round-1 review
+    // flagged a plain cone tip as reading like a horn/blade rather than a
+    // stubby paw once combined with the forward reach.
+    const armGeo = track(new THREE.CylinderGeometry(0.055, 0.11, 0.28, 6));
+    const legGeo = track(new THREE.CylinderGeometry(0.06, 0.12, 0.26, 6));
 
     function makeLimb(geo, pivotPos, coneRot) {
       const pivot = new THREE.Group();
@@ -260,8 +263,20 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // body squish read as "ugly" and broke the silhouette, so speed instead
   // grows hair-like spikes from the back of the head, the same "grows in
   // from nothing" pattern as the other three element props.
-  const tendrilMat = track(lowPolyMaterial(NEUTRAL_COLOR, { transparent: true, opacity: 0 }));
-  const tendrilGeo = track(new THREE.ConeGeometry(0.045, 0.34, 6));
+  // Own accent material (like fire/water) instead of the shared skin blend —
+  // round-1 review found same-color-as-head quills read as small horns/fins
+  // rather than hair, since nothing set them apart from the head surface.
+  const tendrilMat = track(new THREE.MeshStandardMaterial({
+    color: ELEMENT_INFO.speed.accent,
+    emissive: ELEMENT_INFO.speed.color,
+    emissiveIntensity: 0.5,
+    flatShading: true,
+    roughness: 0.3,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0,
+  }));
+  const tendrilGeo = track(new THREE.ConeGeometry(0.04, 0.4, 6));
   const tendrilGroup = new THREE.Group();
   tendrilGroup.position.set(0, headTopY - 0.16, -headRadiusForEyes * 0.55);
   tendrilGroup.scale.setScalar(0.01);
@@ -305,9 +320,8 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       m.material.emissive.copy(blended);
       m.material.emissiveIntensity = Math.min(total, 1) * 0.3;
     }
-    tendrilMat.color.copy(blended);
-    tendrilMat.emissive.copy(blended);
-    tendrilMat.emissiveIntensity = Math.min(total, 1) * 0.3;
+    // tendrilMat intentionally NOT blended — like fire/water, the quills
+    // keep their own fixed accent color instead of the shared skin tint.
 
     const fire = traits.fire ?? 0;
     const water = traits.water ?? 0;
@@ -346,7 +360,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
         // time — capped well under a full turn so the eyes stay legible).
         const rollPhase = t * 0.9;
         group.position.x = Math.sin(rollPhase) * 0.16;
-        body.rotation.x = Math.sin(rollPhase) * 0.85;
+        body.rotation.x = Math.sin(rollPhase) * 0.18;
         group.position.y = Math.abs(Math.sin(rollPhase * 2)) * 0.015;
         group.rotation.y = 0;
       } else {
