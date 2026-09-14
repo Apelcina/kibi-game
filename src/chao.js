@@ -47,12 +47,12 @@ function lowPolyMaterial(color, opts = {}) {
   });
 }
 
-function primitiveGeometry(shape, radius) {
+function primitiveGeometry(shape, radius, detail = 1) {
   if (shape === 'cube') {
     const size = radius * 1.6;
     return new RoundedBoxGeometry(size, size, size, 2, radius * 0.6); // heavily rounded — a soft cube, not a Lego block
   }
-  return new THREE.IcosahedronGeometry(radius, 1); // detail 1: faceted but not chunky
+  return new THREE.IcosahedronGeometry(radius, detail); // detail 1: faceted but not chunky
 }
 
 // Finds the vertices of `geometry` whose direction from its own center is
@@ -91,16 +91,24 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // Age 1: one primitive plays both roles (a ball or a rounded cube — no
   // head/body split yet). Age 2+: the real two-part chibi silhouette.
   let body, head, headTopY, chestY, chestZ, tailY, tailZ;
+  // Sphere heads get a denser icosahedron (detail 2, ~160 vertices vs. 42)
+  // specifically so the vertex morphs below have enough resolution to form
+  // distinct, legible bumps instead of one crude merged wedge — the body
+  // stays at detail 1 for contrast and to keep the poly budget down where
+  // fine detail isn't needed. Cube heads are excluded from morphing
+  // entirely (see collectMorphRegion calls below), so they stay detail 1.
+  const headDetail = shape === 'sphere' ? 2 : 1;
+
   if (isSolo) {
     const soloMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const solo = new THREE.Mesh(track(primitiveGeometry(shape, SOLO_RADIUS)), soloMat);
+    const solo = new THREE.Mesh(track(primitiveGeometry(shape, SOLO_RADIUS, headDetail)), soloMat);
     solo.position.y = SOLO_RADIUS * 0.95;
     group.add(solo);
     body = solo;
     head = solo;
     headTopY = solo.position.y + SOLO_RADIUS;
-    chestY = solo.position.y;
-    chestZ = SOLO_RADIUS * 0.9;
+    chestY = solo.position.y - SOLO_RADIUS * 0.4; // low on the belly, clear of the face/eyes
+    chestZ = SOLO_RADIUS * 0.85;
     tailY = solo.position.y;
     tailZ = -SOLO_RADIUS * 1.05;
   } else {
@@ -111,7 +119,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     group.add(bodyMesh);
 
     const headMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const headMesh = new THREE.Mesh(track(primitiveGeometry(shape, HEAD_RADIUS)), headMat);
+    const headMesh = new THREE.Mesh(track(primitiveGeometry(shape, HEAD_RADIUS, headDetail)), headMat);
     headMesh.position.y = HEAD_Y;
     group.add(headMesh);
 
@@ -140,9 +148,15 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     new THREE.Vector3(0.55, 0.72, 0.2).normalize(),
   ];
   const MOUTH_DIRS = [new THREE.Vector3(0, -0.3, 0.92).normalize()];
-  const quillVerts = collectMorphRegion(headGeo, QUILL_DIRS, 0.9);
-  const hornVerts = collectMorphRegion(headGeo, HORN_DIRS, 0.82);
-  const mouthVerts = collectMorphRegion(headGeo, MOUTH_DIRS, 0.72);
+  // Cube heads don't get morphed at all — collectMorphRegion's "direction
+  // from center" selection assumes a roughly spherical vertex distribution,
+  // and on a rounded box it produced a genuinely broken lopsided-egg result
+  // rather than something merely untuned. Empty regions make applyHeadMorph
+  // a no-op for cube heads.
+  const canMorph = shape === 'sphere';
+  const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.86) : [];
+  const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.88) : [];
+  const mouthVerts = canMorph ? collectMorphRegion(headGeo, MOUTH_DIRS, 0.78) : [];
 
   function applyHeadMorph(speedT, fireT, waterT) {
     const pos = headGeo.attributes.position;
@@ -160,8 +174,8 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       }
     };
     push(quillVerts, 0.26 * speedT); // pulled outward: swept-back hair spikes
-    push(hornVerts, 0.15 * fireT); // pulled outward: small devil horns
-    push(mouthVerts, -0.08 * waterT); // pushed inward: a hint of an open mouth
+    push(hornVerts, 0.21 * fireT); // pulled outward: small devil horns
+    push(mouthVerts, -0.15 * waterT); // pushed inward: a hint of an open mouth
 
     pos.needsUpdate = true;
     headGeo.computeVertexNormals();
