@@ -318,7 +318,10 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     opacity: 0,
     roughness: 0.6,
   }));
-  const thornGeo = track(new THREE.ConeGeometry(0.032, 0.1, 5));
+  // Round-15 review: at normal viewing distance the old size (0.032/0.1)
+  // read as facet-shading noise, not distinct spikes — needed a real size
+  // increase, not just correct placement.
+  const thornGeo = track(new THREE.ConeGeometry(0.055, 0.18, 5));
   const thorns = [];
   function makeThorn(parent, pos, rot, scale) {
     const t = new THREE.Mesh(thornGeo, thornMat);
@@ -332,19 +335,23 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // Spine: a small row of thorns up the back, each tilting a little further
   // back than the last for a stegosaurus-plate rhythm.
   const spineSpecs = [
-    { y: backY - 0.1, s: 0.75, tilt: -0.1 },
-    { y: backY + 0.04, s: 1, tilt: -0.3 },
-    { y: backY + 0.18, s: 0.85, tilt: -0.5 },
+    { y: backY - 0.1, s: 0.8, tilt: -0.1 },
+    { y: backY + 0.06, s: 1.05, tilt: -0.3 },
+    { y: backY + 0.22, s: 0.9, tilt: -0.5 },
   ];
+  // Pushed further back than the body's own surface (backZ * 1.25, not
+  // backZ) so the thorns clear the silhouette edge and read against open
+  // background instead of blending into the body's own curve.
   for (const spec of spineSpecs) {
-    makeThorn(group, [0, spec.y, backZ], [spec.tilt, 0, 0], spec.s);
+    makeThorn(group, [0, spec.y, backZ * 1.25], [spec.tilt, 0, 0], spec.s);
   }
   // Arms (age 2+ only): two thorns on the back of each arm, in the pivot so
-  // they inherit the running-gait swing.
+  // they inherit the running-gait swing. Pushed further from the arm's own
+  // ~0.12 radius for the same reason.
   if (age >= 2) {
     for (const pivot of [armL, armR]) {
-      makeThorn(pivot, [0, 0.03, -0.1], [-Math.PI * 0.42, 0, 0], 0.85);
-      makeThorn(pivot, [0, -0.05, -0.09], [-Math.PI * 0.3, 0, 0], 0.7);
+      makeThorn(pivot, [0, 0.03, -0.15], [-Math.PI * 0.42, 0, 0], 0.95);
+      makeThorn(pivot, [0, -0.06, -0.14], [-Math.PI * 0.3, 0, 0], 0.8);
     }
   }
 
