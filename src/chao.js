@@ -211,10 +211,13 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   const eyeR = makeEye(eyeSpread);
 
   // --- tail (present from age 1, a Chao staple) ----------------------------
-  // A smooth oblong capsule, not a pointed cone — matches the "oblong, not
-  // pointy/blocky" direction the limbs also moved to.
+  // Same squashed-icosahedron blob family as the age-2+ limbs (stretched
+  // into a small teardrop via non-uniform scale) rather than a capsule —
+  // round-10 review flagged the capsule as a visibly different "shape
+  // family" sitting right next to the blob limbs.
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-  const tail = new THREE.Mesh(track(new THREE.CapsuleGeometry(0.075, 0.15, 4, 8)), tailMat);
+  const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.11, 1)), tailMat);
+  tail.scale.set(0.85, 0.85, 1.4);
   tail.position.set(0, tailY, tailZ);
   tail.rotation.x = Math.PI * 0.55;
   group.add(tail);
