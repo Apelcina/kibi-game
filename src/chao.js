@@ -7,19 +7,21 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 // instead of swapping to a different mesh per "evolution".
 //
 // Two structural params control the base silhouette, separate from traits:
-//   age:   1 = bare blob (body + head only), 2 = + arms/legs, 3 = + wings.
-//          This is the coarse "evolution stage" skeleton; traits then layer
-//          finer detail (color, props, proportions) on top of whatever the
-//          current age built.
-//   shape: 'sphere' | 'cube' — which primitive family the body/head are
-//          built from. Ears are deliberately NOT part of the base body —
-//          per design, those (and other animal features) are meant to come
-//          from feeding animal-type items later, not from age/element state.
+//   age:   1 = a single primitive, no separate head/body yet — just a ball
+//          (rolls) or a rounded cube (flops over). 2 = the real two-part
+//          head+body silhouette appears, plus arms/legs. 3 = + wings.
+//   shape: 'sphere' | 'cube' — which primitive family body/head (or the
+//          age-1 solo blob) are built from. Ears are deliberately NOT part
+//          of the base body — per design, those (and other animal features)
+//          are meant to come from feeding animal-type items later, not from
+//          age/element state.
 //
-// Proportions are deliberately chibi: the head is the dominant mass and sits
-// deep into the body (heavy overlap) so it reads as one soft blob with a big
-// face, not two stacked primitives with a visible waist/neck seam.
+// From age 2 on, proportions are deliberately chibi: the head is the
+// dominant mass and sits deep into the body (heavy overlap) so it reads as
+// one soft blob with a big face, not two stacked primitives with a visible
+// waist/neck seam.
 
+const SOLO_RADIUS = 0.4; // age-1 single-primitive size
 const BODY_RADIUS = 0.3;
 const HEAD_RADIUS = 0.42;
 const BODY_Y = BODY_RADIUS * 0.85; // body center height; squash keeps its base near the ground
@@ -39,20 +41,12 @@ function lowPolyMaterial(color, opts = {}) {
   });
 }
 
-function bodyGeometry(shape, radius) {
+function primitiveGeometry(shape, radius) {
   if (shape === 'cube') {
     const size = radius * 1.6;
     return new RoundedBoxGeometry(size, size, size, 2, radius * 0.6); // heavily rounded — a soft cube, not a Lego block
   }
   return new THREE.IcosahedronGeometry(radius, 1); // detail 1: faceted but not chunky
-}
-
-function headGeometry(shape, radius) {
-  if (shape === 'cube') {
-    const size = radius * 1.6;
-    return new RoundedBoxGeometry(size, size, size, 2, radius * 0.6);
-  }
-  return new THREE.IcosahedronGeometry(radius, 1);
 }
 
 export function createChao({ age = 1, shape = 'sphere' } = {}) {
@@ -63,81 +57,114 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     return obj;
   };
 
-  // --- body + head -------------------------------------------------------
-  const bodyMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-  const body = new THREE.Mesh(track(bodyGeometry(shape, BODY_RADIUS)), bodyMat);
-  body.position.y = BODY_Y;
-  body.scale.y = 0.9;
-  group.add(body);
+  const isSolo = age === 1;
 
-  const headMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-  const head = new THREE.Mesh(track(headGeometry(shape, HEAD_RADIUS)), headMat);
-  head.position.y = HEAD_Y;
-  group.add(head);
+  // --- body + head ---------------------------------------------------------
+  // Age 1: one primitive plays both roles (a ball or a rounded cube — no
+  // head/body split yet). Age 2+: the real two-part chibi silhouette.
+  let body, head, headTopY, chestY, chestZ, tailY, tailZ;
+  if (isSolo) {
+    const soloMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    const solo = new THREE.Mesh(track(primitiveGeometry(shape, SOLO_RADIUS)), soloMat);
+    solo.position.y = SOLO_RADIUS * 0.95;
+    group.add(solo);
+    body = solo;
+    head = solo;
+    headTopY = solo.position.y + SOLO_RADIUS;
+    chestY = solo.position.y;
+    chestZ = SOLO_RADIUS * 0.9;
+    tailY = solo.position.y;
+    tailZ = -SOLO_RADIUS * 1.05;
+  } else {
+    const bodyMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    const bodyMesh = new THREE.Mesh(track(primitiveGeometry(shape, BODY_RADIUS)), bodyMat);
+    bodyMesh.position.y = BODY_Y;
+    bodyMesh.scale.y = 0.9;
+    group.add(bodyMesh);
 
-  const headTopY = HEAD_Y + HEAD_RADIUS;
+    const headMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    const headMesh = new THREE.Mesh(track(primitiveGeometry(shape, HEAD_RADIUS)), headMat);
+    headMesh.position.y = HEAD_Y;
+    group.add(headMesh);
+
+    body = bodyMesh;
+    head = headMesh;
+    headTopY = HEAD_Y + HEAD_RADIUS;
+    chestY = BODY_Y + 0.05;
+    chestZ = BODY_RADIUS * 0.95;
+    tailY = BODY_Y + 0.02;
+    tailZ = -BODY_RADIUS * 1.3;
+  }
 
   // --- eyes: smooth + glossy, contrasting with the faceted body -----------
   // Children of `head` (not `group`) so they scale/move with it — keeps them
-  // pinned to the face surface even when a trait (e.g. speed) stretches the
-  // head, instead of clipping into or floating off the mesh.
-  const eyeGeo = track(new THREE.SphereGeometry(0.08, 12, 10));
+  // pinned to the face surface even if the head is ever non-uniformly
+  // scaled, instead of clipping into or floating off the mesh.
+  const eyeRadius = isSolo ? 0.075 : 0.08;
+  const eyeGeo = track(new THREE.SphereGeometry(eyeRadius, 12, 10));
   const eyeMat = track(new THREE.MeshStandardMaterial({ color: 0x171512, roughness: 0.25 }));
   const highlightGeo = track(new THREE.SphereGeometry(0.026, 8, 6));
   const highlightMat = track(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, emissive: 0x333333 }));
 
+  const headRadiusForEyes = isSolo ? SOLO_RADIUS : HEAD_RADIUS;
   function makeEye(x) {
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
-    eye.position.set(x, 0.05, HEAD_RADIUS * 0.82);
+    eye.position.set(x, 0.05, headRadiusForEyes * 0.82);
     const highlight = new THREE.Mesh(highlightGeo, highlightMat);
     highlight.position.set(-0.024 * Math.sign(x || 1), 0.03, 0.05);
     eye.add(highlight);
     head.add(eye);
     return eye;
   }
-  const eyeL = makeEye(-0.17);
-  const eyeR = makeEye(0.17);
+  const eyeSpread = isSolo ? 0.16 : 0.17;
+  const eyeL = makeEye(-eyeSpread);
+  const eyeR = makeEye(eyeSpread);
 
   // --- tail (present from age 1, a Chao staple) ----------------------------
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
   const tail = new THREE.Mesh(track(new THREE.ConeGeometry(0.075, 0.22, 8)), tailMat);
-  tail.position.set(0, BODY_Y + 0.02, -BODY_RADIUS * 1.3);
+  tail.position.set(0, tailY, tailZ);
   tail.rotation.x = Math.PI * 0.55;
   group.add(tail);
 
-  // --- age 2+: arms and legs as soft embedded nubs, not jointed rods -------
-  // A capsule-plus-ball-joint reads as a robot arm no matter how it's
-  // tuned — real chao limbs are just soft rounded paws/feet that look like
-  // they grew out of the body. So: single faceted blobs, squashed into a
-  // paw-ish shape, sunk deep enough into the body/head that there's no
-  // seam or joint to see — only the outer bump pokes out.
+  // --- age 2+: arms and legs — tapered, reaching slightly forward ----------
+  // Each limb is a small tapered cone (embedded base, pointed tip — less
+  // "blobby ball" than a plain squashed sphere) held in a pivot Group
+  // positioned at the shoulder/hip. The cone's own rotation sets a fixed
+  // forward-reaching tilt; the pivot is what update() swings each frame for
+  // the running-gait animation, so the two don't fight over rotation.x.
   const limbs = [];
+  let armL, armR, legL, legR;
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
-    const armGeo = track(new THREE.IcosahedronGeometry(0.15, 1));
-    const legGeo = track(new THREE.IcosahedronGeometry(0.16, 1));
+    const armGeo = track(new THREE.ConeGeometry(0.1, 0.32, 6));
+    const legGeo = track(new THREE.ConeGeometry(0.11, 0.3, 6));
 
-    for (const side of [-1, 1]) {
-      const arm = new THREE.Mesh(armGeo, limbMat);
-      arm.position.set(0.24 * side, 0.26, 0.09);
-      arm.scale.set(1.2, 0.8, 0.95);
-      group.add(arm);
-      limbs.push(arm);
+    function makeLimb(geo, pivotPos, coneRot) {
+      const pivot = new THREE.Group();
+      pivot.position.set(...pivotPos);
+      const mesh = new THREE.Mesh(geo, limbMat);
+      mesh.rotation.set(...coneRot);
+      pivot.add(mesh);
+      group.add(pivot);
+      limbs.push(mesh);
+      return pivot;
     }
 
-    for (const side of [-1, 1]) {
-      const leg = new THREE.Mesh(legGeo, limbMat);
-      leg.position.set(0.15 * side, 0.05, 0.06);
-      leg.scale.set(1, 0.7, 1.1);
-      group.add(leg);
-      limbs.push(leg);
-    }
+    // Cone apex (local +Y) rotated ~90° about X points forward (+Z); a
+    // smaller tilt keeps some of the base embedded while the point reaches
+    // out ahead of the body instead of just sticking out to the side.
+    armL = makeLimb(armGeo, [0.23, 0.27, 0.1], [Math.PI * 0.42, 0, 0.3]);
+    armR = makeLimb(armGeo, [-0.23, 0.27, 0.1], [Math.PI * 0.42, 0, -0.3]);
+    legL = makeLimb(legGeo, [0.15, 0.07, 0.08], [Math.PI * 0.4, 0, 0.15]);
+    legR = makeLimb(legGeo, [-0.15, 0.07, 0.08], [Math.PI * 0.4, 0, -0.15]);
   }
 
   // --- age 3+: basic wings ---------------------------------------------------
   // Own accent material (not the shared skin tint) and thick enough to read
-  // as a wing rather than a sliver, mounted high on the back near the
-  // shoulders so they're visible from a 3/4 front angle, not just from behind.
+  // as a wing rather than a sliver, mounted clear of the head sphere so
+  // they don't read as spikes piercing the skull, oriented so the wide
+  // triangular face (not its thin edge) is what the front-3/4 camera sees.
   let wings = [];
   let wingTilt = 0;
   if (age >= 3) {
@@ -150,12 +177,6 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       emissive: 0x8fc7e8,
       emissiveIntensity: 0.25,
     }));
-    // Cone's local height axis (Y) becomes the outward direction (world X)
-    // once rotated; local Z (flattened to 0.28) stays world Z, so the wing
-    // ends up long-and-tall in the screen plane but thin front-to-back —
-    // a blade, not a spike. Mount point is offset well clear of both the
-    // head sphere (center (0,HEAD_Y,0) r=HEAD_RADIUS) and body, so the base
-    // doesn't sit embedded inside either.
     const wingGeo = track(new THREE.ConeGeometry(0.22, 0.5, 3));
 
     const wingL = new THREE.Mesh(wingGeo, wingMat);
@@ -199,9 +220,8 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
 
-  // water: a small held/worn gem — the readable prop the flat color tint was
-  // missing. Bright white-cyan + strong emissive so it pops against the
-  // water-blue-tinted skin instead of blending into it.
+  // water: a small held/worn gem — bright white-cyan + strong emissive so
+  // it pops against water-blue-tinted skin instead of blending into it.
   const gemMat = track(new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0x8fe0ff,
@@ -213,7 +233,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     opacity: 0,
   }));
   const gem = new THREE.Mesh(track(new THREE.OctahedronGeometry(0.11, 0)), gemMat);
-  gem.position.set(0, BODY_Y + 0.05, BODY_RADIUS * 0.95);
+  gem.position.set(0, chestY, chestZ);
   gem.scale.setScalar(0.01);
   group.add(gem);
 
@@ -221,9 +241,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // full-size (its front-view silhouette: a full-width triangle) and only
   // local Z is flattened — Z is the camera's line-of-sight axis, so the
   // *thin* dimension points away from the viewer and the *wide* dimension
-  // (X) is what actually reads on screen. (Round 1 flattened X instead,
-  // which thinned exactly the dimension the camera could see — that's why
-  // it read as a spike no matter the trait value.)
+  // (X) is what actually reads on screen.
   const leafMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.nature.color,
     flatShading: true,
@@ -237,6 +255,30 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   leaf.scale.set(1, 1, 0.22);
   leaf.scale.multiplyScalar(0.01);
   group.add(leaf);
+
+  // speed: swept-back quills (Sonic/Shadow-style), not a body deform — a
+  // body squish read as "ugly" and broke the silhouette, so speed instead
+  // grows hair-like spikes from the back of the head, the same "grows in
+  // from nothing" pattern as the other three element props.
+  const tendrilMat = track(lowPolyMaterial(NEUTRAL_COLOR, { transparent: true, opacity: 0 }));
+  const tendrilGeo = track(new THREE.ConeGeometry(0.045, 0.34, 6));
+  const tendrilGroup = new THREE.Group();
+  tendrilGroup.position.set(0, headTopY - 0.16, -headRadiusForEyes * 0.55);
+  tendrilGroup.scale.setScalar(0.01);
+  const tendrilSpecs = [
+    { x: 0, rz: 0, rx: -0.55, s: 1 },
+    { x: -0.09, rz: 0.5, rx: -0.4, s: 0.8 },
+    { x: 0.09, rz: -0.5, rx: -0.4, s: 0.8 },
+  ];
+  const tendrils = tendrilSpecs.map((spec) => {
+    const mesh = new THREE.Mesh(tendrilGeo, tendrilMat);
+    mesh.position.set(spec.x, 0, 0);
+    mesh.rotation.set(spec.rx, 0, spec.rz);
+    mesh.scale.setScalar(spec.s);
+    tendrilGroup.add(mesh);
+    return mesh;
+  });
+  group.add(tendrilGroup);
 
   const skinMeshes = [body, head, tail, ...limbs, ...wings];
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
@@ -263,6 +305,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       m.material.emissive.copy(blended);
       m.material.emissiveIntensity = Math.min(total, 1) * 0.3;
     }
+    tendrilMat.color.copy(blended);
+    tendrilMat.emissive.copy(blended);
+    tendrilMat.emissiveIntensity = Math.min(total, 1) * 0.3;
 
     const fire = traits.fire ?? 0;
     const water = traits.water ?? 0;
@@ -287,19 +332,40 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     leafMat.opacity = nature;
     leaf.scale.set(1, 1, 0.22).multiplyScalar(0.01 + nature * 1.1);
 
-    // speed -> aerodynamic: body/head stretch forward and taper. Eyes are
-    // children of `head` so they stay pinned to its surface as it stretches.
-    const stretch = 1 + speed * 0.5;
-    const taper = 1 - speed * 0.2;
-    body.scale.set(taper, 0.9, stretch);
-    head.scale.set(taper, 1, stretch);
-    tail.scale.set(1 - speed * 0.4, 1 + speed * 0.6, 1 - speed * 0.4);
+    // speed -> quills grow in from the back of the head, Sonic/Shadow-style.
+    tendrilMat.opacity = Math.min(speed * 1.2, 1);
+    tendrilGroup.scale.setScalar(0.01 + speed * 1.05);
   }
 
   function update(dt, t) {
-    // idle bob
-    group.position.y = Math.sin(t * 1.6) * 0.035;
-    group.rotation.y = Math.sin(t * 0.5) * 0.12;
+    if (isSolo) {
+      if (shape === 'sphere') {
+        // rolling: rocks back and forth in place, rotation tied to the same
+        // phase as the position sway so it reads as true rolling (not a
+        // free spin that would turn the face away from camera most of the
+        // time — capped well under a full turn so the eyes stay legible).
+        const rollPhase = t * 0.9;
+        group.position.x = Math.sin(rollPhase) * 0.16;
+        body.rotation.x = Math.sin(rollPhase) * 0.85;
+        group.position.y = Math.abs(Math.sin(rollPhase * 2)) * 0.015;
+        group.rotation.y = 0;
+      } else {
+        // flopping cube: rock side to side, dipping/squashing at each "landing"
+        const flopPhase = t * 1.15;
+        group.rotation.z = Math.sin(flopPhase) * 0.55;
+        const landing = Math.pow(Math.abs(Math.sin(flopPhase)), 8);
+        group.scale.y = 1 - landing * 0.14;
+        group.position.y = -landing * 0.018;
+        group.position.x = 0;
+      }
+    } else {
+      // idle bob
+      group.position.y = Math.sin(t * 1.6) * 0.035;
+      group.rotation.y = Math.sin(t * 0.5) * 0.12;
+      group.position.x = 0;
+      group.rotation.z = 0;
+      group.scale.y = 1;
+    }
 
     // blink
     blinkState.timer -= dt;
@@ -329,11 +395,34 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       flameInnerMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
     }
 
+    // speed quills: light windswept sway
+    if (tendrilMat.opacity > 0.01) {
+      tendrilGroup.rotation.z = Math.sin(t * 3) * 0.05;
+      tendrilGroup.rotation.x = Math.sin(t * 2.4) * 0.04;
+    }
+
     // wings: idle flutter (rotation.x — rotation.z holds the fixed outward mount angle)
     if (wings.length) {
       const flap = Math.sin(t * 2.2) * 0.15;
       wings[0].rotation.x = wingTilt + flap;
       wings[1].rotation.x = wingTilt + flap;
+    }
+
+    // age 2+: running-in-place gait — legs swing, opposite arm swings with
+    // each leg (contralateral, like a real trot), body/head bounce twice
+    // per stride (once per footfall) layered on top of the idle bob.
+    if (legL) {
+      const runPhase = t * 6.5;
+      const legSwing = 0.55;
+      const armSwing = 0.4;
+      legL.rotation.x = Math.sin(runPhase) * legSwing;
+      legR.rotation.x = Math.sin(runPhase + Math.PI) * legSwing;
+      armL.rotation.x = Math.sin(runPhase + Math.PI) * armSwing;
+      armR.rotation.x = Math.sin(runPhase) * armSwing;
+
+      const footfall = Math.abs(Math.sin(runPhase));
+      group.position.y += footfall * 0.02;
+      head.rotation.x = footfall * 0.05 - 0.02;
     }
   }
 
