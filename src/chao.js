@@ -301,7 +301,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     const pos = armGeo.attributes.position;
     pos.array.set(armOriginalPos);
     for (const { index, weight, normal } of thornVerts) {
-      const d = 0.13 * natureT * weight;
+      const d = 0.07 * natureT * weight; // round-13 review: 0.13 exceeded the arm's own
+                                          // radius (0.12), reading as a blade from some
+                                          // angles instead of a consistent small thorn
       pos.setXYZ(index, pos.getX(index) + normal.x * d, pos.getY(index) + normal.y * d, pos.getZ(index) + normal.z * d);
     }
     pos.needsUpdate = true;
