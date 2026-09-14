@@ -2,16 +2,25 @@
 // This is the thing "feeding an item" will nudge later — for now, sliders stand
 // in for that so the mapping from trait -> look can be tuned without a feeding
 // system attached yet.
+//
+// Each element also names an `effect` — a distinct visual treatment beyond a
+// flat color tint, dispatched in chao.js. The point is that elements should
+// read as different *kinds* of change (a prop, a silhouette change, a body
+// language change), not just different paint jobs on the same shape.
 
-export const ELEMENTS = ['fire', 'water', 'nature'];
+export const ELEMENTS = ['fire', 'water', 'nature', 'speed'];
 
 export const ELEMENT_INFO = {
-  fire: { label: 'Fire', color: 0xff6a3d },
-  water: { label: 'Water', color: 0x4fa8ff },
-  nature: { label: 'Nature', color: 0x6bd66b },
+  fire: { label: 'Fire', color: 0xe8432c, accent: 0xffb020, effect: 'orb' },
+  water: { label: 'Water', color: 0x2f7fd6, accent: 0xbfe9ff, effect: 'glossy' },
+  nature: { label: 'Nature', color: 0x4caa3f, accent: 0x9be36b, effect: 'sprout' },
+  speed: { label: 'Speed', color: 0xf2c53d, accent: 0xfff2b0, effect: 'aero' },
 };
 
 export const NEUTRAL_COLOR = 0xd8d2c4;
+
+export const AGES = [1, 2, 3];
+export const BODY_SHAPES = ['sphere', 'cube'];
 
 export function createDefaultTraits() {
   const traits = {};
