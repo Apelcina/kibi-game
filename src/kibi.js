@@ -50,7 +50,49 @@ function lowPolyMaterial(color, opts = {}) {
     emissiveIntensity: 0,
     transparent: opts.transparent ?? false,
     opacity: opts.opacity ?? 1,
+    vertexColors: opts.vertexColors ?? false,
   });
+}
+
+// Ensures `geometry` has a per-vertex 'color' attribute to paint into (added
+// lazily — same lazy-init idea as the flame's, but here the values get
+// overwritten every applyTraits() call instead of once at construction).
+function ensureVertexColorAttribute(geometry) {
+  let attr = geometry.attributes.color;
+  if (!attr) {
+    attr = new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count * 3), 3);
+    geometry.setAttribute('color', attr);
+  }
+  return attr;
+}
+
+// Paints a two-color gradient across `mesh`'s OWN local geometry — colorA at
+// the low end of `axis`, colorB at the high end — the "banana/apple" look:
+// two colors blending smoothly across one continuous shape, computed from
+// each mesh's own local vertex extents (so it's always relative to that
+// part's own shape, not one gradient stretched across the whole assembled
+// body). Recomputed every applyTraits() call so it tracks any geometry that
+// moves (the head's speed/dark vertex morph).
+function applyGradientColors(mesh, axis, colorA, colorB) {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const colorAttr = ensureVertexColorAttribute(geo);
+  const get = axis === 'x' ? (i) => pos.getX(i) : axis === 'z' ? (i) => pos.getZ(i) : (i) => pos.getY(i);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const v = get(i);
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const range = max - min || 1;
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = (get(i) - min) / range;
+    c.copy(colorA).lerp(colorB, t);
+    colorAttr.setXYZ(i, c.r, c.g, c.b);
+  }
+  colorAttr.needsUpdate = true;
 }
 
 function primitiveGeometry(shape, radius, detail = 1) {
@@ -140,7 +182,10 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const headDetail = shape === 'sphere' ? 2 : 1;
 
   if (isSolo) {
-    const soloMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    // Base color left white — the actual look comes entirely from the
+    // per-vertex gradient painted in applyTraits (see applyGradientColors),
+    // same as the flame's vertex-color gradient.
+    const soloMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
     const solo = new THREE.Mesh(track(primitiveGeometry(shape, SOLO_RADIUS, headDetail)), soloMat);
     solo.position.y = SOLO_RADIUS * 0.95;
     group.add(solo);
@@ -152,13 +197,13 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     backY = solo.position.y;
     backZ = -SOLO_RADIUS * 0.9;
   } else {
-    const bodyMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    const bodyMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
     const bodyMesh = new THREE.Mesh(track(primitiveGeometry(shape, BODY_RADIUS)), bodyMat);
     bodyMesh.position.y = BODY_Y;
     bodyMesh.scale.y = 0.9;
     group.add(bodyMesh);
 
-    const headMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    const headMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
     const headMesh = new THREE.Mesh(track(primitiveGeometry(shape, HEAD_RADIUS, headDetail)), headMat);
     headMesh.position.y = HEAD_Y;
     group.add(headMesh);
@@ -237,7 +282,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const eyeR = makeEye(0.16);
 
   // --- tail (present from age 1, a Kibi staple) ----------------------------
-  const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+  const tailMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
   const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.09, 1)), tailMat);
   tail.scale.set(0.65, 0.65, 1.7); // shorter than the 2.4 that read as too long
   const tailBaseY = backY - 0.05;
@@ -250,7 +295,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const limbs = [];
   let armL, armR, legL, legR, armMeshL, armMeshR, legMeshL, legMeshR;
   if (age >= 2) {
-    const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
+    const limbMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
     const armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
     const legGeo = track(new THREE.IcosahedronGeometry(LEG_RADIUS, 2));
 
@@ -440,59 +485,68 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   }
 
   const skinMeshes = [body, head, tail, ...limbs, wingL, wingR];
-  // Each part gets a POWER exponent, not a fixed delta. A higher exponent
-  // exaggerates the gap between trait values (so a part with a high
-  // exponent reads as "mostly the single strongest trait"); a lower
-  // exponent flattens the gap (so a part with a low exponent reads as "a
-  // fuller blend of everything that's actually fed"). The head leans
-  // toward "pure dominant identity," the limbs toward "the full mix" —
-  // that's the gradient down the body, without needing a hardcoded
-  // top-2-only cutoff.
-  const colorParts = isSolo
-    ? [{ mesh: body, power: 1.8 }]
-    : [{ mesh: body, power: 2.1 }, { mesh: head, power: 3.4 }];
-  colorParts.push({ mesh: tail, power: 1.5 });
-  for (const m of limbs) colorParts.push({ mesh: m, power: 1.15 });
+  // Each body part gets its own two-color gradient painted across its OWN
+  // local geometry (the "banana/apple" look — see applyGradientColors).
+  // `axis` picks which local axis the gradient runs along: y (top-bottom)
+  // for the roughly-spherical body/head/limbs, z for the tail since it's
+  // elongated along its own local z before the mount rotation is applied.
+  // armMeshL/legMeshL are each other's mirror and SHARE one geometry with
+  // their R counterpart (see makeLimb/armGeo/legGeo above), so painting the
+  // L mesh's geometry already paints R too — only one entry per geometry is
+  // needed here, not one per mesh.
+  const gradientParts = isSolo ? [{ mesh: body, axis: 'y' }] : [{ mesh: body, axis: 'y' }, { mesh: head, axis: 'y' }];
+  gradientParts.push({ mesh: tail, axis: 'z' });
+  if (armMeshL) gradientParts.push({ mesh: armMeshL, axis: 'y' });
+  if (legMeshL) gradientParts.push({ mesh: legMeshL, axis: 'y' });
 
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
   let bulk = 1; // current ground "zoom" factor — computed in the ground block below,
                 // but referenced later (wings) too, so it's hoisted to function scope
 
   function applyTraits(traits) {
-    // Power-weighted color blend, replacing an earlier "only the top 2
-    // traits count, everything else is a capped accent" scheme that (per
-    // direct feedback) effectively ignored a 3rd trait even at ~90% when
-    // the other two were maxed. Every ACTIVE trait contributes here, but
-    // weighted by value^power instead of value directly: raising each
-    // value to a power > 1 exaggerates gaps between them, so a handful of
-    // small "leftover" traits (e.g. 0.05 each) stay negligible — solving
-    // the original "many weak traits muddy the color" problem — while
-    // several genuinely strong traits (e.g. 100/100/90) all still carry
-    // real, comparable weight instead of the weakest of the three being
-    // capped into irrelevance.
+    // Two-major-color scheme, replacing the earlier "one blended color per
+    // part" system. Every active trait is ranked by value; the top 2 become
+    // the two "major" gradient-endpoint colors. Every remaining (minor)
+    // trait is folded into exactly ONE of those two — never split across
+    // both — alternating which major color gets the next-strongest minor
+    // (a "staggered" assignment) so, e.g. with red/green as majors and
+    // blue/yellow as minors, you get red+blue blended into one endpoint and
+    // green+yellow into the other, rather than one muddy 4-way average.
+    // Each body part then paints those two RESULTING colors as a gradient
+    // across its own local geometry (see applyGradientColors) — the
+    // "banana/apple" look: two colors, one continuous blend across the
+    // shape, computed fresh per part from that part's own vertex extents.
     const entries = ELEMENTS.filter((el) => el !== 'fairy')
       .map((el) => ({ el, v: traits[el] ?? 0 }))
-      .filter((e) => e.v > 0.001);
+      .filter((e) => e.v > 0.001)
+      .sort((a, b) => b.v - a.v);
     const total = entries.reduce((s, e) => s + e.v, 0);
     const strength = Math.min(total, 1);
     const neutral = new THREE.Color(NEUTRAL_COLOR);
 
-    function partColor(power) {
-      if (entries.length === 0) return neutral.clone();
-      const weighted = entries.map((e) => ({ el: e.el, w: Math.pow(e.v, power) }));
+    const GROUP_POWER = 1.6; // within a group, exaggerate the gap so the
+                              // group's own strongest member still reads as
+                              // dominant rather than a flat average.
+    function groupColor(group) {
+      if (group.length === 0) return neutral.clone();
+      const weighted = group.map((e) => ({ c: new THREE.Color(ELEMENT_INFO[e.el].color), w: Math.pow(e.v, GROUP_POWER) }));
       const wsum = weighted.reduce((s, e) => s + e.w, 0) || 1;
       const c = new THREE.Color(0, 0, 0);
-      for (const e of weighted) {
-        c.add(new THREE.Color(ELEMENT_INFO[e.el].color).multiplyScalar(e.w / wsum));
-      }
-      c.lerp(neutral, 1 - strength);
+      for (const e of weighted) c.add(e.c.multiplyScalar(e.w / wsum));
       return c;
     }
 
-    for (const { mesh, power } of colorParts) {
-      const c = partColor(power);
-      mesh.material.color.copy(c);
-      mesh.material.emissive.copy(c);
+    const groupA = entries.length > 0 ? [entries[0]] : [];
+    const groupB = entries.length > 1 ? [entries[1]] : [];
+    for (let i = 2; i < entries.length; i++) {
+      (i % 2 === 0 ? groupA : groupB).push(entries[i]);
+    }
+    const colorA = groupColor(groupA).lerp(neutral, 1 - strength);
+    const colorB = groupColor(groupB).lerp(neutral, 1 - strength);
+    const emissiveColor = colorA.clone().lerp(colorB, 0.5);
+
+    for (const { mesh } of gradientParts) {
+      mesh.material.emissive.copy(emissiveColor);
       mesh.material.emissiveIntensity = strength * 0.3;
     }
 
@@ -604,6 +658,14 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // swept quills (Sonic/Shadow-style). dark -> small devil horns pull
     // out of the head's own vertices near the temples (moved from fire).
     applyHeadMorph(speed, dark);
+
+    // Paint the two-color gradient now, AFTER the head morph — the head's
+    // gradient is computed from its CURRENT local vertex positions, so it
+    // has to run after quills/horns have already displaced them, or the
+    // gradient's own top/bottom bounds would be stale.
+    for (const { mesh, axis } of gradientParts) {
+      applyGradientColors(mesh, axis, colorA, colorB);
+    }
 
     // fairy -> wings, purely trait-driven now (they used to also appear
     // automatically at age 3+ regardless of fairy; feedback was that they
