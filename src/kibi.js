@@ -30,7 +30,12 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR, MAJOR_ELEMENTS, MINOR_ELEMENTS, 
 const SOLO_RADIUS = 0.4; // age-1 single-primitive size
 const BODY_RADIUS = 0.3;
 const HEAD_RADIUS = 0.38;
-const BODY_Y = BODY_RADIUS * 0.85; // body center height; squash keeps its base near the ground
+const BODY_SQUASH_Y = 0.9; // body's own vertical squash scale
+// Body center height, solved so its bottom (BODY_Y - BODY_RADIUS*BODY_SQUASH_Y)
+// sits just above y=0 instead of clipping below it — the previous *0.85 left
+// the bottom ~0.015 below ground, which became visible ("butt sits below his
+// feet") once the legs' own ground-clip was fixed to sit exactly at y=0.
+const BODY_Y = BODY_RADIUS * BODY_SQUASH_Y + 0.02;
 const HEAD_Y = 0.58; // overlaps the body for a chibi read, but leaves the body's
                       // sides/bottom clear so age-2 limbs have somewhere to attach
 // Arms: Y (2nd component) is the long axis now, not Z — per feedback, arms
@@ -221,7 +226,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const bodyMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
     const bodyMesh = new THREE.Mesh(track(primitiveGeometry(shape, BODY_RADIUS)), bodyMat);
     bodyMesh.position.y = BODY_Y;
-    bodyMesh.scale.y = 0.9;
+    bodyMesh.scale.y = BODY_SQUASH_Y;
     group.add(bodyMesh);
 
     const headMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
@@ -717,7 +722,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       body.scale.setScalar(bulk);
       body.position.y = bodyBaseY + bodyLift;
     } else {
-      body.scale.set(bulk, 0.9 * bulk, bulk);
+      body.scale.set(bulk, BODY_SQUASH_Y * bulk, bulk);
       body.position.y = bodyBaseY + bodyLift;
       head.scale.set(bulk, bulk, bulk);
       head.position.y = headBaseY + headLift;
