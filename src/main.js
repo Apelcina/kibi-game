@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createKibi } from './kibi.js';
-import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits } from './traits.js';
+import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits, MAJOR_ELEMENTS, MINOR_ELEMENTS, MISC_ELEMENTS } from './traits.js';
 import './style.css';
 
 const sceneRoot = document.getElementById('scene-root');
@@ -119,13 +119,24 @@ function buildPanel(root) {
   });
   panel.appendChild(shapeRow);
 
-  panel.appendChild(buildSection('Elements'));
+  // Grouped to match the color scheme (see kibi.js applyTraits): Major
+  // elements drive the back/dominant color, Minor drive the front/belly
+  // accent, Misc sits outside the color scheme entirely (fairy = wings
+  // only) — traits.js's MAJOR_ELEMENTS/MINOR_ELEMENTS/MISC_ELEMENTS is the
+  // shared source of truth so this grouping can't drift out of sync with
+  // the actual color logic.
   const sliderEls = {};
-  for (const el of ELEMENTS) {
-    const { row, slider, readout } = buildSliderRow(el, traits, () => kibi.applyTraits(traits));
-    sliderEls[el] = { slider, readout };
-    panel.appendChild(row);
-  }
+  const addSliderGroup = (label, els) => {
+    panel.appendChild(buildSection(label));
+    for (const el of els) {
+      const { row, slider, readout } = buildSliderRow(el, traits, () => kibi.applyTraits(traits));
+      sliderEls[el] = { slider, readout };
+      panel.appendChild(row);
+    }
+  };
+  addSliderGroup('Major', MAJOR_ELEMENTS);
+  addSliderGroup('Minor', MINOR_ELEMENTS);
+  addSliderGroup('Misc', MISC_ELEMENTS);
 
   root.appendChild(panel);
 

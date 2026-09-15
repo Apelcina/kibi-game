@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
+import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR, MAJOR_ELEMENTS, MINOR_ELEMENTS, MISC_ELEMENTS } from './traits.js';
 
 // Builds one Kibi as a small hierarchy of low-poly primitives, then exposes
 // applyTraits()/update() so traits (see traits.js) drive its look continuously
@@ -557,19 +557,17 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // muddy blend across a wide near-tie zone (continuous version), because
     // there's no principled tiebreak based on value alone.
     // Fixed instead: every element has a PERMANENT slot, decided by what it
-    // is, not by how strong it currently is — fire/ground/dark/water always
-    // feed the back/dominant color, nature/lightning always feed the front/
-    // belly accent. Nothing here ever compares one trait's value against
-    // another's to decide membership, so there is no crossover to snap at:
-    // each slot is just a continuous weighted blend of its OWN fixed
-    // members, which shifts smoothly as those specific values change.
-    const BACK_ELEMENTS = ['fire', 'ground', 'dark', 'water'];
-    const FRONT_ELEMENTS = ['nature', 'lightning'];
+    // is, not by how strong it currently is (MAJOR_ELEMENTS/MINOR_ELEMENTS,
+    // shared with main.js's panel grouping — see traits.js). Nothing here
+    // ever compares one trait's value against another's to decide
+    // membership, so there is no crossover to snap at: each slot is just a
+    // continuous weighted blend of its OWN fixed members, which shifts
+    // smoothly as those specific values change.
     const CATEGORY_POWER = 1.6; // within a slot, still lean toward that
                                  // slot's own strongest active member rather
                                  // than a flat average of its whole category.
 
-    const total = ELEMENTS.filter((el) => el !== 'fairy').reduce((s, el) => s + (traits[el] ?? 0), 0);
+    const total = ELEMENTS.filter((el) => !MISC_ELEMENTS.includes(el)).reduce((s, el) => s + (traits[el] ?? 0), 0);
     const strength = Math.min(total, 1);
     const neutral = new THREE.Color(NEUTRAL_COLOR);
 
@@ -595,8 +593,8 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       return { pure, presence };
     }
 
-    const back = categoryBlend(BACK_ELEMENTS);
-    const front = categoryBlend(FRONT_ELEMENTS);
+    const back = categoryBlend(MAJOR_ELEMENTS);
+    const front = categoryBlend(MINOR_ELEMENTS);
     // Each side's "not there yet" identity is a tint of the OTHER side's
     // pure hue (or neutral if that's empty too) — same fallback idea as
     // before, but now it's the LERP START POINT rather than a hard swap:
@@ -620,6 +618,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
 
     const fire = traits.fire ?? 0;
     const water = traits.water ?? 0;
+    const ice = traits.ice ?? 0;
     const nature = traits.nature ?? 0;
     const lightning = traits.lightning ?? 0;
     const fairy = traits.fairy ?? 0;
@@ -642,14 +641,18 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     sideFlameGroupL.scale.setScalar(0.01 + sideT * 1.0);
     sideFlameGroupR.scale.setScalar(0.01 + sideT * 1.0);
 
-    // water -> wetter/glossier skin + a held gem fades in, AND (age 2+) the
-    // feet flatten and flare into webbed flippers.
+    // ice -> glossy/icy skin sheen + a held ice gem fades in. (Moved off
+    // water per feedback — water keeps just the webbed-feet effect below;
+    // the gem and shine now belong to ice instead.)
     for (const m of skinMeshes) {
-      m.material.roughness = 0.7 - water * 0.55;
-      m.material.metalness = 0.05 + water * 0.25;
+      m.material.roughness = 0.7 - ice * 0.55;
+      m.material.metalness = 0.05 + ice * 0.25;
     }
-    gemMat.opacity = water;
-    gem.scale.setScalar(0.01 + water * 1.1);
+    gemMat.opacity = ice;
+    gem.scale.setScalar(0.01 + ice * 1.1);
+
+    // water -> (age 2+) the feet flatten and flare into webbed flippers.
+    // (see legMeshL/R scale below, still keyed on `water`.)
 
     // ground -> bigger AND taller. A pure uniform zoom (the previous
     // version) was correctly proportional but read as static — the whole
@@ -861,7 +864,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     for (const obj of disposables) obj.dispose?.();
   }
 
-  applyTraits({ fire: 0, water: 0, nature: 0, lightning: 0, fairy: 0, ground: 0, dark: 0 });
+  applyTraits({ fire: 0, water: 0, ice: 0, nature: 0, lightning: 0, fairy: 0, ground: 0, dark: 0 });
 
   return { group, applyTraits, update, dispose };
 }
