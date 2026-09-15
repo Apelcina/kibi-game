@@ -429,7 +429,6 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   for (const m of limbs) colorParts.push({ mesh: m, power: 1.15 });
 
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
-  let groundLift = 0; // extra resting-position lift from the ground trait, read in update()
 
   function applyTraits(traits) {
     // Power-weighted color blend, replacing an earlier "only the top 2
@@ -492,44 +491,40 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     gemMat.opacity = water;
     gem.scale.setScalar(0.01 + water * 1.1);
 
-    // ground -> bigger AND taller, not just wider. Round-20 feedback: even
-    // with height scaling faster than width, it still read as "bulkier and
-    // squashed." Pushed much further apart this time (width barely grows
-    // at all; height does almost all the work) and added an actual upward
-    // lift to the whole body's resting position (see groundLift, read in
-    // update()) so the creature visibly stands taller, not just stretches
-    // in place from a fixed center — a growth cue independent of the mesh
-    // scale itself.
-    const bulkWide = 1 + ground * 0.08;
-    const bulkTall = 1 + ground * 0.55;
-    groundLift = ground * 0.07;
+    // ground -> just bigger, like zooming in on the exact same model.
+    // Two earlier attempts both overcorrected: a uniform-but-modest scale
+    // read as "puffed up," and pushing height much harder than width to
+    // compensate read as "weird, stretchy, out of proportion" (direct
+    // feedback). The actual fix is simpler than either: ONE scale factor,
+    // applied identically to every axis of every part — body, head, limb
+    // meshes, AND limb attachment POINTS. Scaling positions by the same
+    // factor as everything else is what makes this a true zoom rather than
+    // "grow the mesh from a fixed skeleton": every distance in the rig
+    // grows by the same ratio, so relationships that didn't overlap at
+    // ground=0 (like the arms clearing the head) can't start overlapping
+    // at any ground value either — it's mathematically the same shape,
+    // just scaled, not a different shape.
+    const bulk = 1 + ground * 0.35;
     if (isSolo) {
-      body.scale.set(bulkWide, bulkTall, bulkWide);
+      body.scale.setScalar(bulk);
     } else {
-      body.scale.set(bulkWide, 0.9 * bulkTall, bulkWide);
-      head.scale.set(bulkWide, bulkTall, bulkWide);
+      body.scale.set(bulk, 0.9 * bulk, bulk);
+      head.scale.set(bulk, bulk, bulk);
     }
     if (armMeshL) {
-      armMeshL.scale.set(ARM_BASE_SCALE[0] * bulkWide, ARM_BASE_SCALE[1] * bulkTall, ARM_BASE_SCALE[2] * bulkWide);
-      armMeshR.scale.set(ARM_BASE_SCALE[0] * bulkWide, ARM_BASE_SCALE[1] * bulkTall, ARM_BASE_SCALE[2] * bulkWide);
+      armMeshL.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
+      armMeshR.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
+      armL.position.set(ARM_PIVOT_BASE[0] * bulk, ARM_PIVOT_BASE[1] * bulk, ARM_PIVOT_BASE[2] * bulk);
+      armR.position.set(-ARM_PIVOT_BASE[0] * bulk, ARM_PIVOT_BASE[1] * bulk, ARM_PIVOT_BASE[2] * bulk);
     }
     if (legMeshL) {
       const [sx, sy, sz] = LEG_BASE_SCALE;
-      legMeshL.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
-      legMeshR.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
+      legMeshL.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
+      legMeshR.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
+      legL.position.set(LEG_PIVOT_BASE[0] * bulk, LEG_PIVOT_BASE[1] * bulk, LEG_PIVOT_BASE[2] * bulk);
+      legR.position.set(-LEG_PIVOT_BASE[0] * bulk, LEG_PIVOT_BASE[1] * bulk, LEG_PIVOT_BASE[2] * bulk);
     }
-    // Growing head/body swallows the arm pivots at high ground values
-    // unless the limb MOUNT POINTS also move outward/upward, faster than
-    // the body/head visual scale, so they stay clear instead of the head
-    // simply expanding into the space they used to occupy.
-    if (armL) {
-      const limbSpread = 1 + ground * 0.45;
-      const limbLift = 1 + ground * 0.55;
-      armL.position.set(ARM_PIVOT_BASE[0] * limbSpread, ARM_PIVOT_BASE[1] * limbLift, ARM_PIVOT_BASE[2] * limbSpread);
-      armR.position.set(-ARM_PIVOT_BASE[0] * limbSpread, ARM_PIVOT_BASE[1] * limbLift, ARM_PIVOT_BASE[2] * limbSpread);
-      legL.position.set(LEG_PIVOT_BASE[0] * limbSpread, LEG_PIVOT_BASE[1] * limbLift, LEG_PIVOT_BASE[2] * limbSpread);
-      legR.position.set(-LEG_PIVOT_BASE[0] * limbSpread, LEG_PIVOT_BASE[1] * limbLift, LEG_PIVOT_BASE[2] * limbSpread);
-    }
+    tail.scale.set(0.65 * bulk, 0.65 * bulk, 1.7 * bulk);
 
     // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
     thornMat.opacity = Math.min(nature * 1.2, 1);
@@ -562,11 +557,11 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       group.rotation.z = Math.sin(rockPhase) * 0.55;
       const landing = Math.pow(Math.abs(Math.sin(rockPhase)), 8);
       group.scale.y = 1 - landing * 0.14;
-      group.position.y = -landing * 0.018 + groundLift;
+      group.position.y = -landing * 0.018;
       group.position.x = 0;
     } else {
       // idle bob
-      group.position.y = Math.sin(t * 1.6) * 0.035 + groundLift;
+      group.position.y = Math.sin(t * 1.6) * 0.035;
       group.rotation.y = Math.sin(t * 0.5) * 0.12;
       group.position.x = 0;
       group.rotation.z = 0;
