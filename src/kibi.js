@@ -391,6 +391,41 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
 
+  // Two smaller companion flames, angled outward to either side of the main
+  // tongue. They stay hidden until the main flame is most of the way to its
+  // own full size (fire >= SIDE_FLAME_THRESHOLD), then grow/fade in over the
+  // rest of fire's range — reinforcing "this is becoming a bigger blaze" at
+  // high fire rather than the single tongue just topping out. Each gets its
+  // own little group (growth scale, set in applyTraits, + the fixed outward
+  // tilt) wrapping the actual mesh (flicker wobble only, set in update()) —
+  // same growth/flicker separation as flameGroup/flame above.
+  const SIDE_FLAME_THRESHOLD = 0.75;
+  const SIDE_FLAME_X = 0.08;
+  const SIDE_FLAME_TILT = 0.35;
+  const sideFlameMat = track(new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    emissive: ELEMENT_INFO.fire.color,
+    emissiveIntensity: 0.5,
+    flatShading: true,
+    transparent: true,
+    opacity: 0,
+  }));
+  const sideFlameGeo = track(flameTongueGeometry(0.055, 1.6, 0.82, flameColorBase, flameColorTip));
+  const sideFlameGroupL = new THREE.Group();
+  const sideFlameGroupR = new THREE.Group();
+  sideFlameGroupL.position.set(-SIDE_FLAME_X, 0, 0);
+  sideFlameGroupR.position.set(SIDE_FLAME_X, 0, 0);
+  sideFlameGroupL.rotation.z = SIDE_FLAME_TILT; // leans further left/outward
+  sideFlameGroupR.rotation.z = -SIDE_FLAME_TILT; // leans further right/outward
+  sideFlameGroupL.scale.setScalar(0.01);
+  sideFlameGroupR.scale.setScalar(0.01);
+  const sideFlameL = new THREE.Mesh(sideFlameGeo, sideFlameMat);
+  const sideFlameR = new THREE.Mesh(sideFlameGeo, sideFlameMat);
+  sideFlameGroupL.add(sideFlameL);
+  sideFlameGroupR.add(sideFlameR);
+  flameGroup.add(sideFlameGroupL, sideFlameGroupR);
+
   // water: a small held/worn gem — bright white-cyan + strong emissive so
   // it pops against water-blue-tinted skin instead of blending into it.
   const gemMat = track(new THREE.MeshStandardMaterial({
@@ -595,7 +630,17 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // to "dark", see below — fire is just the flame now.)
     const fireT = Math.min(fire * 1.2, 1);
     flameMat.opacity = fireT;
-    flameGroup.scale.setScalar(0.01 + fire * 1.1);
+    // Final size trimmed to 75% of what it was (per feedback) — the *0.75
+    // is the only change here, fire still drives the same 0.01->1.1 range.
+    flameGroup.scale.setScalar((0.01 + fire * 1.1) * 0.75);
+
+    // Two smaller side flames stay hidden until fire nears the main flame's
+    // own full size, then grow/fade in over the remaining range — 0 at
+    // SIDE_FLAME_THRESHOLD, 1 at fire=1.
+    const sideT = Math.max(0, (fire - SIDE_FLAME_THRESHOLD) / (1 - SIDE_FLAME_THRESHOLD));
+    sideFlameMat.opacity = sideT;
+    sideFlameGroupL.scale.setScalar(0.01 + sideT * 1.0);
+    sideFlameGroupR.scale.setScalar(0.01 + sideT * 1.0);
 
     // water -> wetter/glossier skin + a held gem fades in, AND (age 2+) the
     // feet flatten and flare into webbed flippers.
@@ -771,6 +816,20 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       flame.rotation.x = Math.sin(t * 1.8) * 0.06;
       flameMat.emissiveIntensity = 0.5 + Math.sin(t * 6.5) * 0.2;
       flameGroup.position.y = flameBaseY + Math.sin(t * 1.6) * 0.02;
+    }
+
+    // side flames: same flicker idea as the main tongue, but with their own
+    // phase offsets and a touch faster/livelier so all three don't pulse in
+    // lockstep (which read as one robotic flame instead of three separate
+    // tongues).
+    if (sideFlameMat.opacity > 0.01) {
+      const flickerL = 1 + Math.sin(t * 7.2 + 1.1) * 0.1;
+      const flickerR = 1 + Math.sin(t * 7.2 + 2.6) * 0.1;
+      sideFlameL.scale.set(flickerL, 1 + Math.sin(t * 5.3 + 0.6) * 0.15, flickerL);
+      sideFlameR.scale.set(flickerR, 1 + Math.sin(t * 5.3 + 1.9) * 0.15, flickerR);
+      sideFlameL.rotation.x = Math.sin(t * 2.0 + 0.3) * 0.05;
+      sideFlameR.rotation.x = Math.sin(t * 2.0 + 1.7) * 0.05;
+      sideFlameMat.emissiveIntensity = 0.5 + Math.sin(t * 7.2) * 0.2;
     }
 
     // wings: idle flutter
