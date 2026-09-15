@@ -37,6 +37,8 @@ const ARM_BASE_SCALE = [1, 0.8, 0.95];
 const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
 const ARM_PIVOT_BASE = [0.22, 0.27, 0.15];
 const LEG_PIVOT_BASE = [0.14, 0.06, 0.11];
+const LEG_RADIUS = 0.13; // must match legGeo's IcosahedronGeometry radius below —
+                          // used to solve for the leg pivot Y that keeps feet planted
 
 function lowPolyMaterial(color, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -250,7 +252,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
     const armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
-    const legGeo = track(new THREE.IcosahedronGeometry(0.13, 2));
+    const legGeo = track(new THREE.IcosahedronGeometry(LEG_RADIUS, 2));
 
     function makeLimb(geo, pivotPos, scale) {
       const pivot = new THREE.Group();
@@ -553,11 +555,20 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     }
     if (legMeshL) {
       const [sx, sy, sz] = LEG_BASE_SCALE;
-      legMeshL.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
-      legMeshR.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
+      const legScaleY = sy * (1 - water * 0.4);
+      legMeshL.scale.set(sx * (1 + water * 0.55) * bulk, legScaleY * bulk, sz * (1 + water * 0.7) * bulk);
+      legMeshR.scale.set(sx * (1 + water * 0.55) * bulk, legScaleY * bulk, sz * (1 + water * 0.7) * bulk);
       const legSpread = 1 + ground * 0.15;
-      legL.position.set(LEG_PIVOT_BASE[0] * bulk * legSpread, LEG_PIVOT_BASE[1] * bulk + bodyLift, LEG_PIVOT_BASE[2] * bulk);
-      legR.position.set(-LEG_PIVOT_BASE[0] * bulk * legSpread, LEG_PIVOT_BASE[1] * bulk + bodyLift, LEG_PIVOT_BASE[2] * bulk);
+      // Feet stay planted: the leg pivot Y is NOT just bulk-scaled-and-lifted
+      // like the arms — it's solved so the BOTTOM of the leg mesh
+      // (pivot.y - LEG_RADIUS*legScaleY*bulk) stays exactly where it was at
+      // ground=0, however tall the legs grow. Without this, the legs grew
+      // taller from a pivot that was ALSO rising (bulk + bodyLift), so the
+      // bottom lifted clear off the ground — the character visibly
+      // levitated at high ground values (found by direct review).
+      const legPivotY = LEG_PIVOT_BASE[1] + LEG_RADIUS * legScaleY * (bulk - 1);
+      legL.position.set(LEG_PIVOT_BASE[0] * bulk * legSpread, legPivotY, LEG_PIVOT_BASE[2] * bulk);
+      legR.position.set(-LEG_PIVOT_BASE[0] * bulk * legSpread, legPivotY, LEG_PIVOT_BASE[2] * bulk);
     }
     tail.scale.set(0.65 * bulk, 0.65 * bulk, 1.7 * bulk);
     // Anchor fix (as before): position tracks the body's CURRENT (now
