@@ -231,7 +231,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const bodyBaseY = body.position.y;
   const headBaseY = head.position.y;
 
-  // --- head vertex morphs: speed quills, dark horns -------------------------
+  // --- head vertex morphs: lightning quills, dark horns ---------------------
   // Pull/push a patch of the head's OWN vertices instead of attaching a new
   // mesh. Original positions are cached once; applyTraits() rebuilds the
   // buffer from that cache each call (never compounds).
@@ -253,7 +253,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.9) : [];
   const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.93) : [];
 
-  function applyHeadMorph(speedT, darkT) {
+  function applyHeadMorph(lightningT, darkT) {
     const pos = headGeo.attributes.position;
     pos.array.set(headOriginalPos);
     const push = (entries, amount) => {
@@ -262,7 +262,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
         pos.setXYZ(index, pos.getX(index) + normal.x * d, pos.getY(index) + normal.y * d, pos.getZ(index) + normal.z * d);
       }
     };
-    push(quillVerts, 0.26 * speedT);
+    push(quillVerts, 0.26 * lightningT);
     push(hornVerts, 0.32 * darkT);
     pos.needsUpdate = true;
     headGeo.computeVertexNormals();
@@ -386,7 +386,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   }));
   const flameColorBase = new THREE.Color(ELEMENT_INFO.fire.color);
   const flameColorTip = new THREE.Color(ELEMENT_INFO.fire.accent);
-  const flame = new THREE.Mesh(track(flameTongueGeometry(0.09, 2.3, 0.82, flameColorBase, flameColorTip)), flameMat);
+  const flame = new THREE.Mesh(track(flameTongueGeometry(0.09, 2.0, 0.82, flameColorBase, flameColorTip)), flameMat);
   flameGroup.add(flame);
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
@@ -523,13 +523,13 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // there's no principled tiebreak based on value alone.
     // Fixed instead: every element has a PERMANENT slot, decided by what it
     // is, not by how strong it currently is — fire/ground/dark/water always
-    // feed the back/dominant color, nature/speed always feed the front/
+    // feed the back/dominant color, nature/lightning always feed the front/
     // belly accent. Nothing here ever compares one trait's value against
     // another's to decide membership, so there is no crossover to snap at:
     // each slot is just a continuous weighted blend of its OWN fixed
     // members, which shifts smoothly as those specific values change.
     const BACK_ELEMENTS = ['fire', 'ground', 'dark', 'water'];
-    const FRONT_ELEMENTS = ['nature', 'speed'];
+    const FRONT_ELEMENTS = ['nature', 'lightning'];
     const CATEGORY_POWER = 1.6; // within a slot, still lean toward that
                                  // slot's own strongest active member rather
                                  // than a flat average of its whole category.
@@ -586,7 +586,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const fire = traits.fire ?? 0;
     const water = traits.water ?? 0;
     const nature = traits.nature ?? 0;
-    const speed = traits.speed ?? 0;
+    const lightning = traits.lightning ?? 0;
     const fairy = traits.fairy ?? 0;
     const ground = traits.ground ?? 0;
     const dark = traits.dark ?? 0;
@@ -687,10 +687,10 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     thornMat.opacity = Math.min(nature * 1.2, 1);
     for (const th of thorns) th.scale.setScalar(0.01 + nature * (th.userData.baseScale ?? 1));
 
-    // speed -> the head's own vertices at the back/crown pull outward into
-    // swept quills (Sonic/Shadow-style). dark -> small devil horns pull
+    // lightning -> the head's own vertices at the back/crown pull outward
+    // into swept quills (Sonic/Shadow-style). dark -> small devil horns pull
     // out of the head's own vertices near the temples (moved from fire).
-    applyHeadMorph(speed, dark);
+    applyHeadMorph(lightning, dark);
 
     // Paint the two-color gradient now, AFTER the head morph — the head's
     // gradient is computed from its CURRENT local vertex positions, so it
@@ -761,14 +761,16 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     }
 
     // fire flame: gentle flicker (scale wobble + slight sway + emissive
-    // pulse), plus a slow float bob for the whole flame.
+    // pulse), plus a slow float bob for the whole flame. Slowed down a
+    // notch from the original timing (per feedback) — same motions, just
+    // eased back so the flicker reads calmer rather than jittery.
     if (flameMat.opacity > 0.01) {
-      const flicker = 1 + Math.sin(t * 9) * 0.09;
-      flame.scale.set(flicker, 1 + Math.sin(t * 6.5) * 0.14, flicker);
-      flame.rotation.z = Math.sin(t * 3.1) * 0.1;
-      flame.rotation.x = Math.sin(t * 2.4) * 0.06;
-      flameMat.emissiveIntensity = 0.5 + Math.sin(t * 9) * 0.2;
-      flameGroup.position.y = flameBaseY + Math.sin(t * 2.2) * 0.02;
+      const flicker = 1 + Math.sin(t * 6.5) * 0.09;
+      flame.scale.set(flicker, 1 + Math.sin(t * 4.8) * 0.14, flicker);
+      flame.rotation.z = Math.sin(t * 2.3) * 0.1;
+      flame.rotation.x = Math.sin(t * 1.8) * 0.06;
+      flameMat.emissiveIntensity = 0.5 + Math.sin(t * 6.5) * 0.2;
+      flameGroup.position.y = flameBaseY + Math.sin(t * 1.6) * 0.02;
     }
 
     // wings: idle flutter
@@ -800,7 +802,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     for (const obj of disposables) obj.dispose?.();
   }
 
-  applyTraits({ fire: 0, water: 0, nature: 0, speed: 0, fairy: 0, ground: 0, dark: 0 });
+  applyTraits({ fire: 0, water: 0, nature: 0, lightning: 0, fairy: 0, ground: 0, dark: 0 });
 
   return { group, applyTraits, update, dispose };
 }

@@ -8,13 +8,13 @@
 // read as different *kinds* of change (a prop, a silhouette change, a body
 // language change), not just different paint jobs on the same shape.
 
-export const ELEMENTS = ['fire', 'water', 'nature', 'speed', 'fairy', 'ground', 'dark'];
+export const ELEMENTS = ['fire', 'water', 'nature', 'lightning', 'fairy', 'ground', 'dark'];
 
 export const ELEMENT_INFO = {
   fire: { label: 'Fire', color: 0xe8432c, accent: 0xffb020, effect: 'orb' },
   water: { label: 'Water', color: 0x2f7fd6, accent: 0xbfe9ff, effect: 'glossy' },
   nature: { label: 'Nature', color: 0x4caa3f, accent: 0x9be36b, effect: 'sprout' },
-  speed: { label: 'Speed', color: 0xf2c53d, accent: 0xfff2b0, effect: 'aero' },
+  lightning: { label: 'Lightning', color: 0xf2c53d, accent: 0xfff2b0, effect: 'aero' },
   fairy: { label: 'Fairy', color: 0xff6fc9, accent: 0xffd1ec, effect: 'wings' },
   ground: { label: 'Ground', color: 0x8b6b3d, accent: 0xd4b483, effect: 'bulk' },
   dark: { label: 'Dark', color: 0x3d2a52, accent: 0x8a5fc9, effect: 'horns' },
