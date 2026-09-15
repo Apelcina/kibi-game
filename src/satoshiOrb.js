@@ -111,11 +111,13 @@ export function createSatoshiOrb() {
   glyph.add(glyphMark);
   group.add(glyph);
 
-  const GLOW_MIN = 0.03;
-  const GLOW_MAX = 1.3;
-  const OPACITY_MIN = 0.28;
-  const OPACITY_MAX = 0.64;
-  const GLOW_SPEED = 0.7;
+  const GLOW_BASE = 0.15;
+  const GLOW_PEAK = 1.3;
+  const OPACITY_BASE = 0.4;
+  const OPACITY_PEAK = 0.68;
+  const PULSE_PERIOD = 5; // seconds between flashes
+  const PULSE_SPEED = (Math.PI * 2) / PULSE_PERIOD;
+  const PULSE_SHARPNESS = 10; // higher = briefer flash, more time at rest
   const glowPhase = Math.random() * Math.PI * 2;
   const GLYPH_BOB_RANGE = 0.012;
 
@@ -125,9 +127,11 @@ export function createSatoshiOrb() {
     glyph.rotation.y += dt * 0.6;
     glyph.position.y = Math.sin(t * 0.9) * GLYPH_BOB_RANGE;
 
-    const breathe = 0.5 + 0.5 * Math.sin(t * GLOW_SPEED + glowPhase);
-    outerMat.emissiveIntensity = GLOW_MIN + breathe * (GLOW_MAX - GLOW_MIN);
-    outerMat.opacity = OPACITY_MIN + breathe * (OPACITY_MAX - OPACITY_MIN);
+    // A brief bright flash every PULSE_PERIOD seconds, not a continuous
+    // dark<->bright breath — see collectionOrb.js for the same fix/reasoning.
+    const pulse = Math.pow(Math.max(0, Math.sin(t * PULSE_SPEED + glowPhase)), PULSE_SHARPNESS);
+    outerMat.emissiveIntensity = GLOW_BASE + pulse * (GLOW_PEAK - GLOW_BASE);
+    outerMat.opacity = OPACITY_BASE + pulse * (OPACITY_PEAK - OPACITY_BASE);
   }
 
   function dispose() {
