@@ -170,6 +170,14 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     backZ = -BODY_RADIUS * 1.05;
   }
 
+  // Frozen construction-time y positions — the reference "zero lift" heights
+  // that ground's ramp-up lifts away from. Everything anchored to the body
+  // or head (tail, gem, thorns, wings, flame) computes its offset from
+  // THESE, not from the live (possibly lifted) position, so lift and zoom
+  // don't get double-counted into those offsets.
+  const bodyBaseY = body.position.y;
+  const headBaseY = head.position.y;
+
   // --- head vertex morphs: speed quills, dark horns -------------------------
   // Pull/push a patch of the head's OWN vertices instead of attaching a new
   // mesh. Original positions are cached once; applyTraits() rebuilds the
@@ -230,7 +238,9 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
   const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.09, 1)), tailMat);
   tail.scale.set(0.65, 0.65, 1.7); // shorter than the 2.4 that read as too long
-  tail.position.set(0, backY - 0.05, backZ);
+  const tailBaseY = backY - 0.05;
+  const tailBaseZ = backZ;
+  tail.position.set(0, tailBaseY, tailBaseZ);
   tail.rotation.x = -Math.PI * 0.75;
   group.add(tail);
 
@@ -282,8 +292,11 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const wingL = new THREE.Mesh(wingGeo, wingMat);
   const wingR = new THREE.Mesh(wingGeo, wingMat);
   const wingTilt = 0.28;
-  wingL.position.set(-0.26, 0.36, -0.34);
-  wingR.position.set(0.26, 0.36, -0.34);
+  const wingBaseX = 0.26;
+  const wingBaseY = 0.36;
+  const wingBaseZ = -0.34;
+  wingL.position.set(-wingBaseX, wingBaseY, wingBaseZ);
+  wingR.position.set(wingBaseX, wingBaseY, wingBaseZ);
   wingL.rotation.set(wingTilt, 0, Math.PI * 0.5);
   wingR.rotation.set(wingTilt, 0, -Math.PI * 0.5);
   wingL.scale.setScalar(0.01);
@@ -440,6 +453,8 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   for (const m of limbs) colorParts.push({ mesh: m, power: 1.15 });
 
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
+  let bulk = 1; // current ground "zoom" factor — computed in the ground block below,
+                // but referenced later (wings) too, so it's hoisted to function scope
 
   function applyTraits(traits) {
     // Power-weighted color blend, replacing an earlier "only the top 2
@@ -502,60 +517,69 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     gemMat.opacity = water;
     gem.scale.setScalar(0.01 + water * 1.1);
 
-    // ground -> just bigger, like zooming in on the exact same model.
-    // Two earlier attempts both overcorrected: a uniform-but-modest scale
-    // read as "puffed up," and pushing height much harder than width to
-    // compensate read as "weird, stretchy, out of proportion" (direct
-    // feedback). The actual fix is simpler than either: ONE scale factor,
-    // applied identically to every axis of every part — body, head, limb
-    // meshes, AND limb attachment POINTS. Scaling positions by the same
-    // factor as everything else is what makes this a true zoom rather than
-    // "grow the mesh from a fixed skeleton": every distance in the rig
-    // grows by the same ratio, so relationships that didn't overlap at
-    // ground=0 (like the arms clearing the head) can't start overlapping
-    // at any ground value either — it's mathematically the same shape,
-    // just scaled, not a different shape.
-    const bulk = 1 + ground * 0.35;
+    // ground -> bigger AND taller. A pure uniform zoom (the previous
+    // version) was correctly proportional but read as static — the whole
+    // rig inflating around one fixed center doesn't look like "standing
+    // taller." Per direct feedback: keep the same uniform `bulk` scale on
+    // every axis (still the base of the effect, still what keeps arms
+    // clearing the head etc.), but ALSO lift the body and head centers
+    // upward as ground grows, and lift the head MORE than the body. That
+    // extra head lift is what stops the head from reading as "squashed
+    // onto" the body — without it, both were merely scaling up from fixed
+    // centers, so the head-to-body gap didn't grow along with everything
+    // else and the head looked pressed down into the body at high ground.
+    bulk = 1 + ground * 0.35;
+    const bodyLift = ground * 0.09;
+    const headLift = ground * 0.2; // rises faster than the body
     if (isSolo) {
       body.scale.setScalar(bulk);
+      body.position.y = bodyBaseY + bodyLift;
     } else {
       body.scale.set(bulk, 0.9 * bulk, bulk);
+      body.position.y = bodyBaseY + bodyLift;
       head.scale.set(bulk, bulk, bulk);
+      head.position.y = headBaseY + headLift;
     }
     if (armMeshL) {
       armMeshL.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
       armMeshR.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
-      armL.position.set(ARM_PIVOT_BASE[0] * bulk, ARM_PIVOT_BASE[1] * bulk, ARM_PIVOT_BASE[2] * bulk);
-      armR.position.set(-ARM_PIVOT_BASE[0] * bulk, ARM_PIVOT_BASE[1] * bulk, ARM_PIVOT_BASE[2] * bulk);
+      // Arms/legs also spread a bit further out from center (beyond plain
+      // uniform scale) as ground increases, so the limbs read as pushing
+      // outward to brace a bigger frame rather than the rig just growing
+      // toward/from a single point. They also ride up with the body lift.
+      const armSpread = 1 + ground * 0.18;
+      armL.position.set(ARM_PIVOT_BASE[0] * bulk * armSpread, ARM_PIVOT_BASE[1] * bulk + bodyLift, ARM_PIVOT_BASE[2] * bulk);
+      armR.position.set(-ARM_PIVOT_BASE[0] * bulk * armSpread, ARM_PIVOT_BASE[1] * bulk + bodyLift, ARM_PIVOT_BASE[2] * bulk);
     }
     if (legMeshL) {
       const [sx, sy, sz] = LEG_BASE_SCALE;
       legMeshL.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
       legMeshR.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
-      legL.position.set(LEG_PIVOT_BASE[0] * bulk, LEG_PIVOT_BASE[1] * bulk, LEG_PIVOT_BASE[2] * bulk);
-      legR.position.set(-LEG_PIVOT_BASE[0] * bulk, LEG_PIVOT_BASE[1] * bulk, LEG_PIVOT_BASE[2] * bulk);
+      const legSpread = 1 + ground * 0.15;
+      legL.position.set(LEG_PIVOT_BASE[0] * bulk * legSpread, LEG_PIVOT_BASE[1] * bulk + bodyLift, LEG_PIVOT_BASE[2] * bulk);
+      legR.position.set(-LEG_PIVOT_BASE[0] * bulk * legSpread, LEG_PIVOT_BASE[1] * bulk + bodyLift, LEG_PIVOT_BASE[2] * bulk);
     }
     tail.scale.set(0.65 * bulk, 0.65 * bulk, 1.7 * bulk);
-    // The flame and gem are mounted at fixed points computed from the
-    // head's/body's UNSCALED radius at construction time — without this,
-    // ground growing the head/body past those fixed points makes the flame
-    // sink into the head and the gem sink into the chest at high ground
-    // values (found in review). Recompute both anchors from the meshes'
-    // actual current (scaled) surface each call: offset-from-center * bulk,
-    // added back onto the center itself (which doesn't move, only scales).
-    flameBaseY = head.position.y + (headTopY - head.position.y + 0.03) * bulk;
-    gem.position.set(0, body.position.y + (chestY - body.position.y) * bulk, chestZ * bulk);
-    // Thorns have the identical anchor bug (found in the same review pass):
-    // spine thorns are positioned in `group`-local space around the torso's
-    // center, so their offset-from-center needs the same treatment as the
-    // gem's; arm thorns live in the arm PIVOT's local space, where the
-    // pivot's own origin already IS the center (the arm mesh itself scales
-    // from that same origin), so their whole local position just scales by
-    // bulk directly, no center-offset math needed.
+    // Anchor fix (as before): position tracks the body's CURRENT (now
+    // possibly lifted) center, plus the construction-time offset from that
+    // center scaled by bulk — using bodyBaseY (frozen) rather than the live
+    // body.position.y in the offset math, so the lift isn't double-counted.
+    tail.position.set(0, body.position.y + (tailBaseY - bodyBaseY) * bulk, tailBaseZ * bulk);
+    // Same pattern for the flame (anchored off the head) and the gem
+    // (anchored off the body).
+    flameBaseY = head.position.y + (headTopY - headBaseY + 0.03) * bulk;
+    gem.position.set(0, body.position.y + (chestY - bodyBaseY) * bulk, chestZ * bulk);
+    // Thorns: spine thorns live in `group`-local space around the torso
+    // center, so they get the same center+offset*bulk treatment (using the
+    // live body.position.y as the center, torsoCenterY — frozen, ==
+    // bodyBaseY — only for the offset). Arm thorns live in the arm PIVOT's
+    // local space, where the pivot's own origin already IS the center (the
+    // pivot itself now carries bodyLift), so their local position just
+    // scales by bulk directly.
     for (const th of thorns) {
       const [px, py, pz] = th.userData.basePos;
       if (th.userData.kind === 'spine') {
-        th.position.set(px * bulk, torsoCenterY + (py - torsoCenterY) * bulk, pz * bulk);
+        th.position.set(px * bulk, body.position.y + (py - torsoCenterY) * bulk, pz * bulk);
       } else {
         th.position.set(px * bulk, py * bulk, pz * bulk);
       }
@@ -576,9 +600,17 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // only the fairy trait does), tinted pink as the trait grows.
     const wingPresence = fairy;
     wingMat.opacity = 0.85 * wingPresence;
-    const wingScale = 0.02 + wingPresence * 0.98;
+    // Neither wing position nor scale accounted for ground's `bulk` at all
+    // (found in review) - at high ground they read as shrunken/sunken
+    // against the now-much-bigger body. Same fix pattern as the tail: scale
+    // multiplies straight through, position gets center+offset*bulk (using
+    // body.position.y as the center, consistent with the other back-mounted
+    // props — body and head scale together anyway).
+    const wingScale = (0.02 + wingPresence * 0.98) * bulk;
     wingL.scale.set(wingScale, wingScale, 0.28 * wingScale);
     wingR.scale.set(wingScale, wingScale, 0.28 * wingScale);
+    wingL.position.set(-wingBaseX * bulk, body.position.y + (wingBaseY - bodyBaseY) * bulk, wingBaseZ * bulk);
+    wingR.position.set(wingBaseX * bulk, body.position.y + (wingBaseY - bodyBaseY) * bulk, wingBaseZ * bulk);
     wingMat.color.set(wingBaseColor).lerp(new THREE.Color(ELEMENT_INFO.fairy.color), fairy);
     wingMat.emissive.set(wingBaseEmissive).lerp(new THREE.Color(ELEMENT_INFO.fairy.accent), fairy);
   }
