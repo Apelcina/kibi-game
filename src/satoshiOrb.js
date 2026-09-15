@@ -67,11 +67,17 @@ export function createSatoshiOrb() {
   const outer = new THREE.Mesh(outerGeo, outerMat);
   group.add(outer);
 
-  // --- floating sats glyph: 3 horizontal bars + 2 short angled strokes ---
-  // crossing the top and bottom bars (not the middle one) — a low-poly
-  // stand-in for the community-proposed "sats" symbol, not attached to the
-  // it can drift/spin on its own and read as "floating."
+  // --- floating sats glyph: 3 close-set bars + 2 short end caps ----------
+  // Built per the reference image: three parallel bars stacked tightly,
+  // with two short caps positioned ABOVE the top bar and BELOW the bottom
+  // bar only — not crossing/overlapping the bars themselves (an earlier
+  // version had the caps crossing through the top/bottom bars, which was
+  // wrong). Everything is built axis-aligned in `glyphMark` first (bars
+  // horizontal, caps vertical) and the whole assembly is tilted ONE time,
+  // so every element ends up parallel at the same angle rather than each
+  // piece getting its own independent rotation.
   const glyph = new THREE.Group();
+  const glyphMark = new THREE.Group();
   const glyphMat = track(new THREE.MeshStandardMaterial({
     color: accentColor,
     flatShading: true,
@@ -80,26 +86,29 @@ export function createSatoshiOrb() {
     emissive: accentColor,
     emissiveIntensity: 0.5,
   }));
-  const BAR_LENGTH = 0.1;
-  const BAR_THICKNESS = 0.016;
+  const BAR_LENGTH = 0.085;
+  const BAR_THICKNESS = 0.014;
+  const BAR_GAP = 0.02; // tight stacking, per feedback
   const barGeo = track(new THREE.BoxGeometry(BAR_LENGTH, BAR_THICKNESS, BAR_THICKNESS));
-  const BAR_GAP = 0.045;
   for (const y of [-BAR_GAP, 0, BAR_GAP]) {
     const bar = new THREE.Mesh(barGeo, glyphMat);
     bar.position.y = y;
-    glyph.add(bar);
+    glyphMark.add(bar);
   }
-  const STROKE_LENGTH = 0.07;
-  const strokeGeo = track(new THREE.BoxGeometry(BAR_THICKNESS, STROKE_LENGTH, BAR_THICKNESS));
-  const STROKE_TILT = 0.36; // ~20 degrees, "angled slightly"
-  const strokeTop = new THREE.Mesh(strokeGeo, glyphMat);
-  strokeTop.position.y = BAR_GAP;
-  strokeTop.rotation.z = STROKE_TILT;
-  glyph.add(strokeTop);
-  const strokeBottom = new THREE.Mesh(strokeGeo, glyphMat);
-  strokeBottom.position.y = -BAR_GAP;
-  strokeBottom.rotation.z = STROKE_TILT;
-  glyph.add(strokeBottom);
+  const CAP_LENGTH = 0.032;
+  const CAP_MARGIN = 0.02; // clear gap between a cap and the nearest bar's edge — needs
+                            // to be visually obvious, not just non-zero (a tiny margin
+                            // still read as one continuous line at normal viewing size)
+  const capGeo = track(new THREE.BoxGeometry(BAR_THICKNESS, CAP_LENGTH, BAR_THICKNESS));
+  const capOffset = BAR_GAP + BAR_THICKNESS / 2 + CAP_MARGIN + CAP_LENGTH / 2;
+  const capTop = new THREE.Mesh(capGeo, glyphMat);
+  capTop.position.y = capOffset;
+  glyphMark.add(capTop);
+  const capBottom = new THREE.Mesh(capGeo, glyphMat);
+  capBottom.position.y = -capOffset;
+  glyphMark.add(capBottom);
+  glyphMark.rotation.z = 0.3; // ~17 degrees — the whole mark tilts as one piece
+  glyph.add(glyphMark);
   group.add(glyph);
 
   const GLOW_MIN = 0.03;
