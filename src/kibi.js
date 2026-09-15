@@ -361,11 +361,17 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   // (wide base, narrow crown) spread across the back.
   const thornGeo = track(new THREE.ConeGeometry(0.078, 0.145, 5));
   const thorns = [];
-  function makeThorn(parent, pos, quat, scale) {
+  function makeThorn(parent, pos, quat, scale, kind) {
     const t = new THREE.Mesh(thornGeo, thornMat);
     t.position.set(...pos);
     if (quat) t.quaternion.copy(quat);
     t.userData.baseScale = scale;
+    // basePos/kind: same anchor-tracking need the flame/gem had — these
+    // are positioned once at construction from an unscaled torso/arm
+    // radius, so without this they'd sink into the body as ground grows
+    // it (found in review). Re-applied every applyTraits() call below.
+    t.userData.basePos = pos;
+    t.userData.kind = kind;
     parent.add(t);
     thorns.push(t);
     return t;
@@ -390,7 +396,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const embedDepth = torsoRadius * 0.9; // slightly inside the surface so it reads as rooted, not resting on top
     const pos = [d.x * embedDepth, torsoCenterY + d.y * embedDepth, d.z * embedDepth];
     const quat = new THREE.Quaternion().setFromUnitVectors(upAxis, d);
-    makeThorn(group, pos, quat, spec.s);
+    makeThorn(group, pos, quat, spec.s, 'spine');
   }
   // Arms (age 2+ only), in the pivot so they inherit the running-gait swing.
   // Round-18 feedback: the previous mostly-(-Z) direction placed them
@@ -410,11 +416,11 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       const d = dir.clone().normalize();
       const quat = new THREE.Quaternion().setFromUnitVectors(upAxis, d);
       const posL = [d.x * armRadius * 1.15, d.y * armRadius * 1.15, d.z * armRadius * 1.15];
-      makeThorn(armL, posL, quat, s);
+      makeThorn(armL, posL, quat, s, 'arm');
       const dMirrored = new THREE.Vector3(-d.x, d.y, d.z);
       const quatR = new THREE.Quaternion().setFromUnitVectors(upAxis, dMirrored);
       const posR = [dMirrored.x * armRadius * 1.15, dMirrored.y * armRadius * 1.15, dMirrored.z * armRadius * 1.15];
-      makeThorn(armR, posR, quatR, s);
+      makeThorn(armR, posR, quatR, s, 'arm');
     }
   }
 
@@ -539,6 +545,21 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // added back onto the center itself (which doesn't move, only scales).
     flameBaseY = head.position.y + (headTopY - head.position.y + 0.03) * bulk;
     gem.position.set(0, body.position.y + (chestY - body.position.y) * bulk, chestZ * bulk);
+    // Thorns have the identical anchor bug (found in the same review pass):
+    // spine thorns are positioned in `group`-local space around the torso's
+    // center, so their offset-from-center needs the same treatment as the
+    // gem's; arm thorns live in the arm PIVOT's local space, where the
+    // pivot's own origin already IS the center (the arm mesh itself scales
+    // from that same origin), so their whole local position just scales by
+    // bulk directly, no center-offset math needed.
+    for (const th of thorns) {
+      const [px, py, pz] = th.userData.basePos;
+      if (th.userData.kind === 'spine') {
+        th.position.set(px * bulk, torsoCenterY + (py - torsoCenterY) * bulk, pz * bulk);
+      } else {
+        th.position.set(px * bulk, py * bulk, pz * bulk);
+      }
+    }
 
     // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
     thornMat.opacity = Math.min(nature * 1.2, 1);
