@@ -66,13 +66,16 @@ function ensureVertexColorAttribute(geometry) {
   return attr;
 }
 
-// Paints a two-color gradient across `mesh`'s OWN local geometry — colorA at
-// the low end of `axis`, colorB at the high end — the "banana/apple" look:
-// two colors blending smoothly across one continuous shape, computed from
-// each mesh's own local vertex extents (so it's always relative to that
-// part's own shape, not one gradient stretched across the whole assembled
-// body). Recomputed every applyTraits() call so it tracks any geometry that
-// moves (the head's speed/dark vertex morph).
+// Paints colorA/colorB across `mesh`'s OWN local geometry along `axis` — but
+// NOT as one long 0->1 blend (that read as a wide, muddy wash of the
+// in-between color across most of the surface, per direct feedback). Real
+// character design reads as mostly ONE clear color (the back/majority) with
+// a SHORT, soft accent patch of the second color near the other end (a
+// belly, toes, the front of a face/arm) — so colorA holds solid across most
+// of the range, and only the last FRONT_BAND fraction eases into colorB,
+// with a smoothstep curve so that short transition itself is soft-edged
+// rather than a hard seam.
+const FRONT_BAND = 0.4;
 function applyGradientColors(mesh, axis, colorA, colorB) {
   const geo = mesh.geometry;
   const pos = geo.attributes.position;
@@ -86,10 +89,13 @@ function applyGradientColors(mesh, axis, colorA, colorB) {
     if (v > max) max = v;
   }
   const range = max - min || 1;
+  const bandStart = 1 - FRONT_BAND;
   const c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const t = (get(i) - min) / range;
-    c.copy(colorA).lerp(colorB, t);
+    let et = t <= bandStart ? 0 : (t - bandStart) / FRONT_BAND;
+    et = et * et * (3 - 2 * et); // smoothstep: soft edges on the short transition itself
+    c.copy(colorA).lerp(colorB, et);
     colorAttr.setXYZ(i, c.r, c.g, c.b);
   }
   colorAttr.needsUpdate = true;
@@ -487,17 +493,20 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const skinMeshes = [body, head, tail, ...limbs, wingL, wingR];
   // Each body part gets its own two-color gradient painted across its OWN
   // local geometry (the "banana/apple" look — see applyGradientColors).
-  // `axis` picks which local axis the gradient runs along: y (top-bottom)
-  // for the roughly-spherical body/head/limbs, z for the tail since it's
-  // elongated along its own local z before the mount rotation is applied.
-  // armMeshL/legMeshL are each other's mirror and SHARE one geometry with
-  // their R counterpart (see makeLimb/armGeo/legGeo above), so painting the
-  // L mesh's geometry already paints R too — only one entry per geometry is
-  // needed here, not one per mesh.
-  const gradientParts = isSolo ? [{ mesh: body, axis: 'y' }] : [{ mesh: body, axis: 'y' }, { mesh: head, axis: 'y' }];
+  // `axis` picks which local axis the gradient runs along: z (back-to-front)
+  // for body/head/limbs, matching the existing +z-is-front convention used
+  // elsewhere (eyes/chestZ/gemZ are all positive z) — this is what gives the
+  // "soft belly/face/front-of-arm" accent-patch read, back stays the solid
+  // dominant color. The tail keeps its own local z too (its length axis,
+  // base to tip, unrelated to the body's front/back). armMeshL/legMeshL are
+  // each other's mirror and SHARE one geometry with their R counterpart (see
+  // makeLimb/armGeo/legGeo above), so painting the L mesh's geometry already
+  // paints R too — only one entry per geometry is needed here, not one per
+  // mesh.
+  const gradientParts = isSolo ? [{ mesh: body, axis: 'z' }] : [{ mesh: body, axis: 'z' }, { mesh: head, axis: 'z' }];
   gradientParts.push({ mesh: tail, axis: 'z' });
-  if (armMeshL) gradientParts.push({ mesh: armMeshL, axis: 'y' });
-  if (legMeshL) gradientParts.push({ mesh: legMeshL, axis: 'y' });
+  if (armMeshL) gradientParts.push({ mesh: armMeshL, axis: 'z' });
+  if (legMeshL) gradientParts.push({ mesh: legMeshL, axis: 'z' });
 
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
   let bulk = 1; // current ground "zoom" factor — computed in the ground block below,
@@ -541,14 +550,28 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     for (let i = 2; i < entries.length; i++) {
       (i % 2 === 0 ? groupA : groupB).push(entries[i]);
     }
+    // colorA is the dominant/back color — it covers most of each part's
+    // surface (see FRONT_BAND in applyGradientColors), so it needs to stay
+    // clearly readable as itself, not averaged down.
     const colorA = groupColor(groupA).lerp(neutral, 1 - strength);
-    const colorB = groupColor(groupB).lerp(neutral, 1 - strength);
-    const emissiveColor = colorA.clone().lerp(colorB, 0.5);
+    // colorB is the front/belly accent. With a real second trait active it's
+    // that trait's (possibly minor-blended) color; with only one trait
+    // active there's nothing to blend toward, so previously this fell back
+    // to the flat neutral (a light beige) — which read as "pink body, white
+    // belly," i.e. not clearly red at all. A lighter TINT of colorA itself
+    // reads as a natural soft-belly highlight of the SAME color instead.
+    const colorB = groupB.length > 0
+      ? groupColor(groupB).lerp(neutral, 1 - strength)
+      : colorA.clone().lerp(new THREE.Color(0xffffff), 0.4);
 
-    for (const { mesh } of gradientParts) {
-      mesh.material.emissive.copy(emissiveColor);
-      mesh.material.emissiveIntensity = strength * 0.3;
-    }
+    // No uniform emissive tint on the gradient parts (there used to be one,
+    // colored by the blended trait color): a material's emissive is ONE
+    // flat color for the whole mesh, so tinting it toward either colorA or
+    // colorB washes that same tint over BOTH ends of the gradient, muddying
+    // whichever color it isn't — e.g. a red emissive glow pushed the blue
+    // "front" accent toward magenta, and a 50/50-averaged glow did the same
+    // to both ends at once. The vertex-painted gradient itself is left to
+    // read on its own, at full clarity, with no added tint.
 
     const fire = traits.fire ?? 0;
     const water = traits.water ?? 0;
