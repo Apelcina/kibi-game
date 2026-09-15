@@ -109,9 +109,11 @@ export function createCollectionOrb(element) {
   makeLeaf(-1);
   makeLeaf(1);
 
-  const GLOW_MIN = 0.12;
-  const GLOW_MAX = 0.4;
-  const GLOW_SPEED = 0.9; // slow — a full up/down breath takes a few seconds
+  const GLOW_MIN = 0.03;
+  const GLOW_MAX = 1.3;
+  const OPACITY_MIN = 0.28;
+  const OPACITY_MAX = 0.64;
+  const GLOW_SPEED = 0.7; // slow — a full up/down breath takes a few seconds
   const glowPhase = Math.random() * Math.PI * 2; // stagger multiple orbs so they don't pulse in sync
 
   function update(dt, t) {
@@ -119,9 +121,13 @@ export function createCollectionOrb(element) {
     group.rotation.y += dt * 0.18;
 
     // Slow ambient breathing glow on the shell — no moving highlight, just
-    // its overall emissive intensity easing up and down.
+    // its overall emissive intensity (and, so the pulse actually reads
+    // through the transparency, its opacity too) easing up and down. A
+    // narrower emissive-only range was too subtle to notice against the
+    // sky background, per feedback.
     const breathe = 0.5 + 0.5 * Math.sin(t * GLOW_SPEED + glowPhase);
     outerMat.emissiveIntensity = GLOW_MIN + breathe * (GLOW_MAX - GLOW_MIN);
+    outerMat.opacity = OPACITY_MIN + breathe * (OPACITY_MAX - OPACITY_MIN);
   }
 
   function dispose() {
