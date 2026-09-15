@@ -28,7 +28,8 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR, MAJOR_ELEMENTS, MINOR_ELEMENTS, 
 // accent color is needed that a shared-material vertex morph can't provide.
 
 const SOLO_RADIUS = 0.4; // age-1 single-primitive size
-const BODY_RADIUS = 0.3;
+const BODY_RADIUS = 0.24; // experimenting with a smaller body (was 0.3) — head stays the
+                           // same size, so this also exaggerates the big-head chibi look
 const HEAD_RADIUS = 0.38;
 const BODY_SQUASH_Y = 0.9; // body's own vertical squash scale
 // Body center height, solved so its bottom (BODY_Y - BODY_RADIUS*BODY_SQUASH_Y)
