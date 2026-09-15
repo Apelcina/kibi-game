@@ -23,7 +23,7 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 // vertices over bolting on new prop meshes wherever the effect is plausibly
 // part of the head's own surface (quills, horns). New meshes are reserved
 // for things that genuinely aren't part of the body — a held gem, a
-// floating flame orb, thorn spikes — or where a distinct (e.g. darker)
+// floating flame tongues, thorn spikes — or where a distinct (e.g. darker)
 // accent color is needed that a shared-material vertex morph can't provide.
 
 const SOLO_RADIUS = 0.4; // age-1 single-primitive size
@@ -54,6 +54,38 @@ function primitiveGeometry(shape, radius, detail = 1) {
     return new RoundedBoxGeometry(size, size, size, 2, radius * 0.6); // heavily rounded — a soft cube, not a Lego block
   }
   return new THREE.IcosahedronGeometry(radius, detail); // detail 1: faceted but not chunky
+}
+
+// A flame "tongue": ONE continuous mesh, not two primitives glued together.
+// The fire orb+cone kept reading as broken because a sphere's circumference
+// and a cone's base circumference don't naturally line up — any fix there
+// was patching a seam, not removing it. This builds a single icosahedron,
+// stretched tall, then manually tapers each vertex's X/Z toward the top
+// (vertices near the bottom keep the full radius, vertices near the top
+// pinch toward the center) — a wide rooted base and a pointed tip with no
+// seam anywhere, because there's only one piece of geometry.
+function flameTongueGeometry(radius, heightScale, taperAmount) {
+  const geo = new THREE.IcosahedronGeometry(radius, 2);
+  const pos = geo.attributes.position;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const range = maxY - minY;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const t = (y - minY) / range; // 0 at the base, 1 at the tip
+    const taper = 1 - t * taperAmount;
+    pos.setXYZ(i, x * taper, y * heightScale, z * taper);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
 }
 
 // Finds the vertices of `geometry` whose direction from its own center is
@@ -138,7 +170,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   ];
   // Horns used to be fire's second effect; moved to "dark" (devil-horn
   // imagery fits a dark/shadow theme better than fire, and fire is now
-  // meant to stay a single clean effect — the flame orb).
+  // meant to stay a single clean effect — the flame).
   const HORN_DIRS = [
     new THREE.Vector3(-0.5, 0.78, 0.15).normalize(),
     new THREE.Vector3(0.5, 0.78, 0.15).normalize(),
@@ -247,16 +279,19 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const wings = [wingL, wingR];
 
   // --- element accessories ---------------------------------------------------
-  // fire: a floating orb with a two-tone flame rising out of it — like an
-  // upside-down ice-cream cone (scoop/orb at the bottom, cone tip up)
-  // hovering just above the head, centered. Round-17 feedback: the orb read
-  // as bigger than the cone (a ball dominating a tiny flame) — the orb is
-  // now clearly smaller than the cone's own base so the flame silhouette
-  // dominates and the orb reads as a small anchor/ember, not the main shape.
+  // fire: two overlapping flame "tongues" (see flameTongueGeometry above),
+  // hovering just above the head, centered. The orb+cone design kept
+  // reading as broken because those are two different primitive families —
+  // a sphere and a cone don't share a circumference at any radius, so
+  // wherever they met always looked like a seam/mismatch no matter how the
+  // sizes were tuned. Two tongues of the SAME continuous shape (just
+  // different sizes/heights/colors, clustered like real flame licks)
+  // sidesteps the problem entirely — there's no edge that has to line up
+  // with another primitive's edge, because nothing is stacked on anything.
   const flameGroup = new THREE.Group();
-  const flameBaseY = headTopY + 0.14;
+  const flameBaseY = headTopY + 0.1;
   flameGroup.position.set(0, flameBaseY, 0);
-  const flameOuterMat = track(new THREE.MeshStandardMaterial({
+  const flameMainMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.fire.color,
     emissive: ELEMENT_INFO.fire.color,
     emissiveIntensity: 1.1,
@@ -264,7 +299,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     transparent: true,
     opacity: 0,
   }));
-  const flameInnerMat = track(new THREE.MeshStandardMaterial({
+  const flameAccentMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.fire.accent,
     emissive: ELEMENT_INFO.fire.accent,
     emissiveIntensity: 1.4,
@@ -272,15 +307,12 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     transparent: true,
     opacity: 0,
   }));
-  // Orb shares flameOuterMat (not its own material) so it's guaranteed to
-  // match the cone's color and flicker in lockstep, not just approximately.
-  const orb = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.05, 1)), flameOuterMat);
-  flameGroup.add(orb);
-  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.075, 0.2, 6)), flameOuterMat);
-  flameOuter.position.y = 0.09;
-  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.042, 0.12, 6)), flameInnerMat);
-  flameInner.position.y = 0.13;
-  flameGroup.add(flameOuter, flameInner);
+  const flameMain = new THREE.Mesh(track(flameTongueGeometry(0.075, 2.1, 0.8)), flameMainMat);
+  flameMain.position.set(-0.015, 0, 0);
+  const flameSmall = new THREE.Mesh(track(flameTongueGeometry(0.05, 1.6, 0.75)), flameAccentMat);
+  flameSmall.position.set(0.03, -0.015, 0.02);
+  flameSmall.rotation.z = 0.25;
+  flameGroup.add(flameMain, flameSmall);
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
 
@@ -434,11 +466,11 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const ground = traits.ground ?? 0;
     const dark = traits.dark ?? 0;
 
-    // fire -> floating flame orb grows in, centered above the head. (Just
-    // the orb now — horns moved to "dark", see below.)
+    // fire -> the two-tongue flame grows in, centered above the head.
+    // (Horns moved to "dark", see below — fire is just the flame now.)
     const fireT = Math.min(fire * 1.2, 1);
-    flameOuterMat.opacity = fireT; // orb shares this material, so it's covered too
-    flameInnerMat.opacity = fireT;
+    flameMainMat.opacity = fireT;
+    flameAccentMat.opacity = fireT;
     flameGroup.scale.setScalar(0.01 + fire * 1.1);
 
     // water -> wetter/glossier skin + a held gem fades in, AND (age 2+) the
@@ -450,25 +482,27 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     gemMat.opacity = water;
     gem.scale.setScalar(0.01 + water * 1.1);
 
-    // ground -> bulkier build. Scales the body/head mass and the limbs up
-    // together (multiplied onto their own base scale, not replacing it) —
-    // a stockier, heavier-set physique rather than a uniform "everything
-    // bigger" blow-up.
-    const bulk = 1 + ground * 0.22;
+    // ground -> bigger AND taller, not just wider. A uniform scale-up
+    // (equal on all 3 axes) just makes a proportionally-identical, larger
+    // version of the same flattened-looking shape — height needs to grow
+    // faster than width/depth or the result reads as puffed-up/squashed
+    // rather than genuinely bigger.
+    const bulkWide = 1 + ground * 0.16;
+    const bulkTall = 1 + ground * 0.32;
     if (isSolo) {
-      body.scale.setScalar(bulk);
+      body.scale.set(bulkWide, bulkTall, bulkWide);
     } else {
-      body.scale.set(bulk, 0.9 * bulk, bulk);
-      head.scale.set(bulk, bulk, bulk);
+      body.scale.set(bulkWide, 0.9 * bulkTall, bulkWide);
+      head.scale.set(bulkWide, bulkTall, bulkWide);
     }
     if (armMeshL) {
-      armMeshL.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
-      armMeshR.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
+      armMeshL.scale.set(ARM_BASE_SCALE[0] * bulkWide, ARM_BASE_SCALE[1] * bulkTall, ARM_BASE_SCALE[2] * bulkWide);
+      armMeshR.scale.set(ARM_BASE_SCALE[0] * bulkWide, ARM_BASE_SCALE[1] * bulkTall, ARM_BASE_SCALE[2] * bulkWide);
     }
     if (legMeshL) {
       const [sx, sy, sz] = LEG_BASE_SCALE;
-      legMeshL.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
-      legMeshR.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
+      legMeshL.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
+      legMeshR.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
     }
 
     // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
@@ -530,16 +564,18 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       }
     }
 
-    // fire flame: gentle flicker + a slow float bob (it's a floating orb now,
-    // not anchored flush to the head).
-    if (flameOuterMat.opacity > 0.01) {
-      const flicker = 1 + Math.sin(t * 9) * 0.08;
-      flameOuter.scale.set(flicker, 1 + Math.sin(t * 7) * 0.12, flicker);
-      const orbPulse = 1 + Math.sin(t * 5.5) * 0.06;
-      orb.scale.setScalar(orbPulse);
-      flameOuterMat.emissiveIntensity = 1 + Math.sin(t * 9) * 0.25;
-      flameInnerMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
-      flameGroup.position.y = flameBaseY + Math.sin(t * 2.2) * 0.025;
+    // fire flame: each tongue flickers on its own phase (scale wobble +
+    // emissive pulse) so they read as licking independently, plus a slow
+    // float bob for the whole cluster.
+    if (flameMainMat.opacity > 0.01) {
+      const mainFlicker = 1 + Math.sin(t * 9) * 0.09;
+      flameMain.scale.set(mainFlicker, 1 + Math.sin(t * 6.5) * 0.14, mainFlicker);
+      flameMain.rotation.z = Math.sin(t * 3.1) * 0.08;
+      const smallFlicker = 1 + Math.sin(t * 11 + 1.5) * 0.1;
+      flameSmall.scale.set(smallFlicker, 1 + Math.sin(t * 8 + 1.5) * 0.16, smallFlicker);
+      flameMainMat.emissiveIntensity = 1 + Math.sin(t * 9) * 0.25;
+      flameAccentMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
+      flameGroup.position.y = flameBaseY + Math.sin(t * 2.2) * 0.02;
     }
 
     // wings: idle flutter
