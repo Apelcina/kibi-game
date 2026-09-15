@@ -95,10 +95,9 @@ export function createSatoshiOrb() {
     bar.position.y = y;
     glyphMark.add(bar);
   }
-  const CAP_LENGTH = 0.032;
-  const CAP_MARGIN = 0.02; // clear gap between a cap and the nearest bar's edge — needs
-                            // to be visually obvious, not just non-zero (a tiny margin
-                            // still read as one continuous line at normal viewing size)
+  const CAP_LENGTH = 0.026; // shorter, per feedback
+  const CAP_MARGIN = 0.012; // closer to the bar stack, per feedback — still a clear
+                             // gap (the earlier 0.006 read as one continuous line)
   const capGeo = track(new THREE.BoxGeometry(BAR_THICKNESS, CAP_LENGTH, BAR_THICKNESS));
   const capOffset = BAR_GAP + BAR_THICKNESS / 2 + CAP_MARGIN + CAP_LENGTH / 2;
   const capTop = new THREE.Mesh(capGeo, glyphMat);
@@ -108,6 +107,7 @@ export function createSatoshiOrb() {
   capBottom.position.y = -capOffset;
   glyphMark.add(capBottom);
   glyphMark.rotation.z = 0.3; // ~17 degrees — the whole mark tilts as one piece
+  glyphMark.scale.setScalar(1.2); // whole glyph a bit bigger, per feedback
   glyph.add(glyphMark);
   group.add(glyph);
 
