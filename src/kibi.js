@@ -9,8 +9,9 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 // Two structural params control the base silhouette, separate from traits:
 //   age:   1 = a single primitive, no separate head/body yet — a ball that
 //          rocks side to side in place. 2 = the real two-part head+body
-//          silhouette appears, plus arms/legs. 3 = + wings (wings can also
-//          appear earlier via the fairy trait — see applyTraits).
+//          silhouette appears, plus arms/legs. 3 currently adds nothing of
+//          its own — wings used to auto-appear here but are now purely
+//          driven by the fairy trait at any age (see applyTraits).
 //   shape: 'sphere' | 'cube' — cube is shelved for now (not offered in the
 //          UI, see traits.js) but primitiveGeometry() still supports it.
 //
@@ -58,15 +59,18 @@ function primitiveGeometry(shape, radius, detail = 1) {
   return new THREE.IcosahedronGeometry(radius, detail); // detail 1: faceted but not chunky
 }
 
-// A flame "tongue": ONE continuous mesh, not two primitives glued together.
-// The fire orb+cone kept reading as broken because a sphere's circumference
-// and a cone's base circumference don't naturally line up — any fix there
-// was patching a seam, not removing it. This builds a single icosahedron,
-// stretched tall, then manually tapers each vertex's X/Z toward the top
-// (vertices near the bottom keep the full radius, vertices near the top
-// pinch toward the center) — a wide rooted base and a pointed tip with no
-// seam anywhere, because there's only one piece of geometry.
-function flameTongueGeometry(radius, heightScale, taperAmount) {
+// A flame "tongue": ONE continuous mesh, not two primitives glued together,
+// and — per round-20 feedback that two separately-colored tongues looked
+// "janky" — not two separate meshes either. This builds a single
+// icosahedron, tapers each vertex's X/Z toward the top (bottom keeps full
+// radius, top pinches to a point), and shifts the whole thing so its base
+// sits exactly at local y=0 (an untouched icosahedron is CENTERED on y=0,
+// so roughly half of it used to hang below the mount point — that's what
+// was clipping into the head). Vertex colors blend from `baseColor` at the
+// root to `tipColor` at the point, so the two-tone read comes from color
+// gradient on one continuous surface instead of two separate shapes that
+// have to visually align.
+function flameTongueGeometry(radius, heightScale, taperAmount, baseColor, tipColor) {
   const geo = new THREE.IcosahedronGeometry(radius, 2);
   const pos = geo.attributes.position;
   let minY = Infinity;
@@ -77,14 +81,21 @@ function flameTongueGeometry(radius, heightScale, taperAmount) {
     if (y > maxY) maxY = y;
   }
   const range = maxY - minY;
+  const colors = new Float32Array(pos.count * 3);
+  const c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
     const z = pos.getZ(i);
     const t = (y - minY) / range; // 0 at the base, 1 at the tip
     const taper = 1 - t * taperAmount;
-    pos.setXYZ(i, x * taper, y * heightScale, z * taper);
+    pos.setXYZ(i, x * taper, t * range * heightScale, z * taper); // base fixed at y=0, grows upward only
+    c.copy(baseColor).lerp(tipColor, Math.min(t * 1.4, 1)); // tip color arrives a bit before the very point
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
   }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   pos.needsUpdate = true;
   geo.computeVertexNormals();
   return geo;
@@ -218,7 +229,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   // --- tail (present from age 1, a Kibi staple) ----------------------------
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
   const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.09, 1)), tailMat);
-  tail.scale.set(0.65, 0.65, 2.4);
+  tail.scale.set(0.65, 0.65, 1.7); // shorter than the 2.4 that read as too long
   tail.position.set(0, backY - 0.05, backZ);
   tail.rotation.x = -Math.PI * 0.75;
   group.add(tail);
@@ -281,40 +292,31 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const wings = [wingL, wingR];
 
   // --- element accessories ---------------------------------------------------
-  // fire: two overlapping flame "tongues" (see flameTongueGeometry above),
-  // hovering just above the head, centered. The orb+cone design kept
-  // reading as broken because those are two different primitive families —
-  // a sphere and a cone don't share a circumference at any radius, so
-  // wherever they met always looked like a seam/mismatch no matter how the
-  // sizes were tuned. Two tongues of the SAME continuous shape (just
-  // different sizes/heights/colors, clustered like real flame licks)
-  // sidesteps the problem entirely — there's no edge that has to line up
-  // with another primitive's edge, because nothing is stacked on anything.
+  // fire: ONE flame tongue (see flameTongueGeometry above), hovering just
+  // above the head, centered. Two separate tongues (tried previously) read
+  // as "janky" — two independently-flickering shapes never quite look like
+  // one flame, even with no geometric seam between them. A single mesh
+  // with a red-at-root-to-yellow-at-tip VERTEX COLOR gradient gets the
+  // two-tone read without needing a second piece of geometry at all. The
+  // base is pinned to local y=0 by the geometry builder (not centered like
+  // a raw icosahedron), so raising flameBaseY a small amount above the
+  // head's own top is enough to clear it with no overlap/clipping.
   const flameGroup = new THREE.Group();
-  const flameBaseY = headTopY + 0.1;
+  const flameBaseY = headTopY + 0.03;
   flameGroup.position.set(0, flameBaseY, 0);
-  const flameMainMat = track(new THREE.MeshStandardMaterial({
-    color: ELEMENT_INFO.fire.color,
+  const flameMat = track(new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
     emissive: ELEMENT_INFO.fire.color,
-    emissiveIntensity: 1.1,
+    emissiveIntensity: 0.5,
     flatShading: true,
     transparent: true,
     opacity: 0,
   }));
-  const flameAccentMat = track(new THREE.MeshStandardMaterial({
-    color: ELEMENT_INFO.fire.accent,
-    emissive: ELEMENT_INFO.fire.accent,
-    emissiveIntensity: 1.4,
-    flatShading: true,
-    transparent: true,
-    opacity: 0,
-  }));
-  const flameMain = new THREE.Mesh(track(flameTongueGeometry(0.075, 2.1, 0.8)), flameMainMat);
-  flameMain.position.set(-0.015, 0, 0);
-  const flameSmall = new THREE.Mesh(track(flameTongueGeometry(0.05, 1.6, 0.75)), flameAccentMat);
-  flameSmall.position.set(0.03, -0.015, 0.02);
-  flameSmall.rotation.z = 0.25;
-  flameGroup.add(flameMain, flameSmall);
+  const flameColorBase = new THREE.Color(ELEMENT_INFO.fire.color);
+  const flameColorTip = new THREE.Color(ELEMENT_INFO.fire.accent);
+  const flame = new THREE.Mesh(track(flameTongueGeometry(0.09, 2.3, 0.82, flameColorBase, flameColorTip)), flameMat);
+  flameGroup.add(flame);
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
 
@@ -412,49 +414,56 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   }
 
   const skinMeshes = [body, head, tail, ...limbs, wingL, wingR];
+  // Each part gets a POWER exponent, not a fixed delta. A higher exponent
+  // exaggerates the gap between trait values (so a part with a high
+  // exponent reads as "mostly the single strongest trait"); a lower
+  // exponent flattens the gap (so a part with a low exponent reads as "a
+  // fuller blend of everything that's actually fed"). The head leans
+  // toward "pure dominant identity," the limbs toward "the full mix" —
+  // that's the gradient down the body, without needing a hardcoded
+  // top-2-only cutoff.
   const colorParts = isSolo
-    ? [{ mesh: body, delta: -0.05 }]
-    : [{ mesh: body, delta: 0.1 }, { mesh: head, delta: -0.3 }];
-  colorParts.push({ mesh: tail, delta: 0.15 });
-  for (const m of limbs) colorParts.push({ mesh: m, delta: 0.3 });
+    ? [{ mesh: body, power: 1.8 }]
+    : [{ mesh: body, power: 2.1 }, { mesh: head, power: 3.4 }];
+  colorParts.push({ mesh: tail, power: 1.5 });
+  for (const m of limbs) colorParts.push({ mesh: m, power: 1.15 });
 
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
+  let groundLift = 0; // extra resting-position lift from the ground trait, read in update()
 
   function applyTraits(traits) {
-    // Top-2 weighted color blend: with many traits fed at once, averaging
-    // ALL of them muddies toward brown/gray. Instead, only the two highest
-    // trait values ever mix for the main body color (a 3rd+ trait shows as
-    // a small accent, not a full ingredient) — and different body parts
-    // lean toward primary or secondary by a different amount each, so the
-    // creature reads as a gradient between the two colors rather than one
-    // flat tint everywhere.
+    // Power-weighted color blend, replacing an earlier "only the top 2
+    // traits count, everything else is a capped accent" scheme that (per
+    // direct feedback) effectively ignored a 3rd trait even at ~90% when
+    // the other two were maxed. Every ACTIVE trait contributes here, but
+    // weighted by value^power instead of value directly: raising each
+    // value to a power > 1 exaggerates gaps between them, so a handful of
+    // small "leftover" traits (e.g. 0.05 each) stay negligible — solving
+    // the original "many weak traits muddy the color" problem — while
+    // several genuinely strong traits (e.g. 100/100/90) all still carry
+    // real, comparable weight instead of the weakest of the three being
+    // capped into irrelevance.
     const entries = ELEMENTS.filter((el) => el !== 'fairy')
       .map((el) => ({ el, v: traits[el] ?? 0 }))
-      .filter((e) => e.v > 0.001)
-      .sort((a, b) => b.v - a.v);
+      .filter((e) => e.v > 0.001);
     const total = entries.reduce((s, e) => s + e.v, 0);
     const strength = Math.min(total, 1);
-
-    const top1 = entries[0];
-    const top2 = entries[1];
-    const top3 = entries[2];
-    const primaryColor = top1 ? new THREE.Color(ELEMENT_INFO[top1.el].color) : new THREE.Color(NEUTRAL_COLOR);
-    const secondaryColor = top2 ? new THREE.Color(ELEMENT_INFO[top2.el].color) : primaryColor.clone();
-    const secondaryWeight = top1 && top2 ? top2.v / (top1.v + top2.v) : 0;
-    const accentColor = top3 ? new THREE.Color(ELEMENT_INFO[top3.el].color) : null;
-    const accentStrength = top3 ? Math.min(top3.v, 0.4) : 0;
     const neutral = new THREE.Color(NEUTRAL_COLOR);
 
-    function partColor(delta) {
-      const t = THREE.MathUtils.clamp(secondaryWeight + delta, 0, 1);
-      const c = primaryColor.clone().lerp(secondaryColor, t);
+    function partColor(power) {
+      if (entries.length === 0) return neutral.clone();
+      const weighted = entries.map((e) => ({ el: e.el, w: Math.pow(e.v, power) }));
+      const wsum = weighted.reduce((s, e) => s + e.w, 0) || 1;
+      const c = new THREE.Color(0, 0, 0);
+      for (const e of weighted) {
+        c.add(new THREE.Color(ELEMENT_INFO[e.el].color).multiplyScalar(e.w / wsum));
+      }
       c.lerp(neutral, 1 - strength);
-      if (accentColor) c.lerp(accentColor, accentStrength * 0.5);
       return c;
     }
 
-    for (const { mesh, delta } of colorParts) {
-      const c = partColor(delta);
+    for (const { mesh, power } of colorParts) {
+      const c = partColor(power);
       mesh.material.color.copy(c);
       mesh.material.emissive.copy(c);
       mesh.material.emissiveIntensity = strength * 0.3;
@@ -468,11 +477,10 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const ground = traits.ground ?? 0;
     const dark = traits.dark ?? 0;
 
-    // fire -> the two-tongue flame grows in, centered above the head.
-    // (Horns moved to "dark", see below — fire is just the flame now.)
+    // fire -> the flame grows in, centered above the head. (Horns moved
+    // to "dark", see below — fire is just the flame now.)
     const fireT = Math.min(fire * 1.2, 1);
-    flameMainMat.opacity = fireT;
-    flameAccentMat.opacity = fireT;
+    flameMat.opacity = fireT;
     flameGroup.scale.setScalar(0.01 + fire * 1.1);
 
     // water -> wetter/glossier skin + a held gem fades in, AND (age 2+) the
@@ -484,13 +492,17 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     gemMat.opacity = water;
     gem.scale.setScalar(0.01 + water * 1.1);
 
-    // ground -> bigger AND taller, not just wider. A uniform scale-up
-    // (equal on all 3 axes) just makes a proportionally-identical, larger
-    // version of the same flattened-looking shape — height needs to grow
-    // faster than width/depth or the result reads as puffed-up/squashed
-    // rather than genuinely bigger.
-    const bulkWide = 1 + ground * 0.16;
-    const bulkTall = 1 + ground * 0.32;
+    // ground -> bigger AND taller, not just wider. Round-20 feedback: even
+    // with height scaling faster than width, it still read as "bulkier and
+    // squashed." Pushed much further apart this time (width barely grows
+    // at all; height does almost all the work) and added an actual upward
+    // lift to the whole body's resting position (see groundLift, read in
+    // update()) so the creature visibly stands taller, not just stretches
+    // in place from a fixed center — a growth cue independent of the mesh
+    // scale itself.
+    const bulkWide = 1 + ground * 0.08;
+    const bulkTall = 1 + ground * 0.55;
+    groundLift = ground * 0.07;
     if (isSolo) {
       body.scale.set(bulkWide, bulkTall, bulkWide);
     } else {
@@ -506,17 +518,13 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       legMeshL.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
       legMeshR.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
     }
-    // Round-19 review found a real regression here: growing the head alone
-    // (it already overlaps the body deeply, by design, for the chibi look)
-    // swallowed the arm pivots at high ground values — the arms weren't
-    // detached, just geometrically buried under the now-larger head, so
-    // they read as completely missing from every angle. Limb MOUNT POINTS
-    // now move outward with ground too, faster than the body/head grow
-    // (0.4 vs 0.16/0.32), so the limbs stay clear as the whole creature
-    // gets bigger instead of the head expanding into where they used to be.
+    // Growing head/body swallows the arm pivots at high ground values
+    // unless the limb MOUNT POINTS also move outward/upward, faster than
+    // the body/head visual scale, so they stay clear instead of the head
+    // simply expanding into the space they used to occupy.
     if (armL) {
-      const limbSpread = 1 + ground * 0.4;
-      const limbLift = 1 + ground * 0.3;
+      const limbSpread = 1 + ground * 0.45;
+      const limbLift = 1 + ground * 0.55;
       armL.position.set(ARM_PIVOT_BASE[0] * limbSpread, ARM_PIVOT_BASE[1] * limbLift, ARM_PIVOT_BASE[2] * limbSpread);
       armR.position.set(-ARM_PIVOT_BASE[0] * limbSpread, ARM_PIVOT_BASE[1] * limbLift, ARM_PIVOT_BASE[2] * limbSpread);
       legL.position.set(LEG_PIVOT_BASE[0] * limbSpread, LEG_PIVOT_BASE[1] * limbLift, LEG_PIVOT_BASE[2] * limbSpread);
@@ -532,9 +540,11 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // out of the head's own vertices near the temples (moved from fire).
     applyHeadMorph(speed, dark);
 
-    // fairy -> wings (also guaranteed present at age 3+ regardless of this
-    // trait), tinted pink as the trait grows.
-    const wingPresence = Math.max(age >= 3 ? 1 : 0, fairy);
+    // fairy -> wings, purely trait-driven now (they used to also appear
+    // automatically at age 3+ regardless of fairy; feedback was that they
+    // read as "permanently there," so age no longer grants them at all —
+    // only the fairy trait does), tinted pink as the trait grows.
+    const wingPresence = fairy;
     wingMat.opacity = 0.85 * wingPresence;
     const wingScale = 0.02 + wingPresence * 0.98;
     wingL.scale.set(wingScale, wingScale, 0.28 * wingScale);
@@ -552,11 +562,11 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       group.rotation.z = Math.sin(rockPhase) * 0.55;
       const landing = Math.pow(Math.abs(Math.sin(rockPhase)), 8);
       group.scale.y = 1 - landing * 0.14;
-      group.position.y = -landing * 0.018;
+      group.position.y = -landing * 0.018 + groundLift;
       group.position.x = 0;
     } else {
       // idle bob
-      group.position.y = Math.sin(t * 1.6) * 0.035;
+      group.position.y = Math.sin(t * 1.6) * 0.035 + groundLift;
       group.rotation.y = Math.sin(t * 0.5) * 0.12;
       group.position.x = 0;
       group.rotation.z = 0;
@@ -582,17 +592,14 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       }
     }
 
-    // fire flame: each tongue flickers on its own phase (scale wobble +
-    // emissive pulse) so they read as licking independently, plus a slow
-    // float bob for the whole cluster.
-    if (flameMainMat.opacity > 0.01) {
-      const mainFlicker = 1 + Math.sin(t * 9) * 0.09;
-      flameMain.scale.set(mainFlicker, 1 + Math.sin(t * 6.5) * 0.14, mainFlicker);
-      flameMain.rotation.z = Math.sin(t * 3.1) * 0.08;
-      const smallFlicker = 1 + Math.sin(t * 11 + 1.5) * 0.1;
-      flameSmall.scale.set(smallFlicker, 1 + Math.sin(t * 8 + 1.5) * 0.16, smallFlicker);
-      flameMainMat.emissiveIntensity = 1 + Math.sin(t * 9) * 0.25;
-      flameAccentMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
+    // fire flame: gentle flicker (scale wobble + slight sway + emissive
+    // pulse), plus a slow float bob for the whole flame.
+    if (flameMat.opacity > 0.01) {
+      const flicker = 1 + Math.sin(t * 9) * 0.09;
+      flame.scale.set(flicker, 1 + Math.sin(t * 6.5) * 0.14, flicker);
+      flame.rotation.z = Math.sin(t * 3.1) * 0.1;
+      flame.rotation.x = Math.sin(t * 2.4) * 0.06;
+      flameMat.emissiveIntensity = 0.5 + Math.sin(t * 9) * 0.2;
       flameGroup.position.y = flameBaseY + Math.sin(t * 2.2) * 0.02;
     }
 
