@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createChao } from './chao.js';
+import { createKibi } from './kibi.js';
 import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits } from './traits.js';
 import './style.css';
 
@@ -40,48 +40,48 @@ scene.add(sun);
 // --- ground platform (low-poly garden patch) --------------------------------
 const groundGeo = new THREE.CylinderGeometry(2.2, 2.2, 0.2, 24, 1);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x7fc96b, flatShading: true, roughness: 0.9 });
-const ground = new THREE.Mesh(groundGeo, groundMat);
-ground.position.y = -0.1;
-ground.receiveShadow = true;
-scene.add(ground);
+const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+groundMesh.position.y = -0.1;
+groundMesh.receiveShadow = true;
+scene.add(groundMesh);
 
-// --- chao (rebuilt whenever age/shape change; traits persist across that) ---
+// --- kibi (rebuilt whenever age/shape change; traits persist across that) ---
 const traits = createDefaultTraits();
 const structure = { age: 1, shape: 'sphere' };
-let chao = null;
+let kibi = null;
 
-function rebuildChao() {
-  if (chao) {
-    scene.remove(chao.group);
-    chao.dispose();
+function rebuildKibi() {
+  if (kibi) {
+    scene.remove(kibi.group);
+    kibi.dispose();
   }
-  chao = createChao(structure);
-  chao.group.traverse((obj) => {
+  kibi = createKibi(structure);
+  kibi.group.traverse((obj) => {
     if (obj.isMesh) obj.castShadow = true;
   });
-  chao.applyTraits(traits);
-  scene.add(chao.group);
+  kibi.applyTraits(traits);
+  scene.add(kibi.group);
 }
-rebuildChao();
+rebuildKibi();
 
 // Dev-only hook: reliable state setter for scripted screenshot/testing tools,
 // since driving <input type="range">/radio elements from outside the page is
 // flaky (native events, ref drift across rebuilds). Not part of the game.
-window.__chaoDebug = {
+window.__kibiDebug = {
   setStructure(partial) {
     Object.assign(structure, partial);
-    rebuildChao();
+    rebuildKibi();
     syncPanelInputs();
   },
   setTraits(partial) {
     Object.assign(traits, partial);
-    chao.applyTraits(traits);
+    kibi.applyTraits(traits);
     syncPanelInputs();
   },
   reset() {
     Object.assign(structure, { age: 1, shape: 'sphere' });
     for (const el of ELEMENTS) traits[el] = 0;
-    rebuildChao();
+    rebuildKibi();
     syncPanelInputs();
   },
   getState() {
@@ -98,7 +98,7 @@ function buildPanel(root) {
   panel.className = 'trait-panel';
 
   const title = document.createElement('h1');
-  title.textContent = 'chao garden — trait test';
+  title.textContent = 'kibi — trait test';
   panel.appendChild(title);
   const hint = document.createElement('p');
   hint.className = 'hint';
@@ -108,21 +108,21 @@ function buildPanel(root) {
   panel.appendChild(buildSection('Age'));
   const ageRow = buildRadioRow('age', AGES.map((a) => ({ value: a, label: `${a}` })), structure.age, (v) => {
     structure.age = Number(v);
-    rebuildChao();
+    rebuildKibi();
   });
   panel.appendChild(ageRow);
 
   panel.appendChild(buildSection('Shape'));
   const shapeRow = buildRadioRow('shape', BODY_SHAPES.map((s) => ({ value: s, label: s })), structure.shape, (v) => {
     structure.shape = v;
-    rebuildChao();
+    rebuildKibi();
   });
   panel.appendChild(shapeRow);
 
   panel.appendChild(buildSection('Elements'));
   const sliderEls = {};
   for (const el of ELEMENTS) {
-    const { row, slider, readout } = buildSliderRow(el, traits, () => chao.applyTraits(traits));
+    const { row, slider, readout } = buildSliderRow(el, traits, () => kibi.applyTraits(traits));
     sliderEls[el] = { slider, readout };
     panel.appendChild(row);
   }
@@ -219,7 +219,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   const t = clock.elapsedTime;
-  chao.update(dt, t);
+  kibi.update(dt, t);
   controls.update();
   renderer.render(scene, camera);
 });

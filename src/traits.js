@@ -4,11 +4,11 @@
 // system attached yet.
 //
 // Each element also names an `effect` — a distinct visual treatment beyond a
-// flat color tint, dispatched in chao.js. The point is that elements should
+// flat color tint, dispatched in kibi.js. The point is that elements should
 // read as different *kinds* of change (a prop, a silhouette change, a body
 // language change), not just different paint jobs on the same shape.
 
-export const ELEMENTS = ['fire', 'water', 'nature', 'speed', 'fairy'];
+export const ELEMENTS = ['fire', 'water', 'nature', 'speed', 'fairy', 'ground', 'dark'];
 
 export const ELEMENT_INFO = {
   fire: { label: 'Fire', color: 0xe8432c, accent: 0xffb020, effect: 'orb' },
@@ -16,13 +16,15 @@ export const ELEMENT_INFO = {
   nature: { label: 'Nature', color: 0x4caa3f, accent: 0x9be36b, effect: 'sprout' },
   speed: { label: 'Speed', color: 0xf2c53d, accent: 0xfff2b0, effect: 'aero' },
   fairy: { label: 'Fairy', color: 0xff6fc9, accent: 0xffd1ec, effect: 'wings' },
+  ground: { label: 'Ground', color: 0x8b6b3d, accent: 0xd4b483, effect: 'bulk' },
+  dark: { label: 'Dark', color: 0x3d2a52, accent: 0x8a5fc9, effect: 'horns' },
 };
 
 export const NEUTRAL_COLOR = 0xd8d2c4;
 
 export const AGES = [1, 2, 3];
 // Cube shape shelved for now (its "flop" animation moved to the sphere's
-// idle instead — see chao.js update()); still supported internally by
+// idle instead — see kibi.js update()); still supported internally by
 // primitiveGeometry() in case it's revisited, just not offered in the UI.
 export const BODY_SHAPES = ['sphere'];
 

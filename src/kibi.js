@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 
-// Builds one Chao as a small hierarchy of low-poly primitives, then exposes
+// Builds one Kibi as a small hierarchy of low-poly primitives, then exposes
 // applyTraits()/update() so traits (see traits.js) drive its look continuously
 // instead of swapping to a different mesh per "evolution".
 //
@@ -28,10 +28,12 @@ import { ELEMENTS, ELEMENT_INFO, NEUTRAL_COLOR } from './traits.js';
 
 const SOLO_RADIUS = 0.4; // age-1 single-primitive size
 const BODY_RADIUS = 0.3;
-const HEAD_RADIUS = 0.38; // trimmed down from 0.42 — was reading "a bit too big"
+const HEAD_RADIUS = 0.38;
 const BODY_Y = BODY_RADIUS * 0.85; // body center height; squash keeps its base near the ground
 const HEAD_Y = 0.58; // overlaps the body for a chibi read, but leaves the body's
                       // sides/bottom clear so age-2 limbs have somewhere to attach
+const ARM_BASE_SCALE = [1, 0.8, 0.95];
+const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
 
 function lowPolyMaterial(color, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -76,7 +78,7 @@ function collectMorphRegion(geometry, dirs, threshold) {
   return entries;
 }
 
-export function createChao({ age = 1, shape = 'sphere' } = {}) {
+export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const group = new THREE.Group();
   const disposables = [];
   const track = (obj) => {
@@ -123,7 +125,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     backZ = -BODY_RADIUS * 1.05;
   }
 
-  // --- head vertex morphs: speed quills, fire horns -------------------------
+  // --- head vertex morphs: speed quills, dark horns -------------------------
   // Pull/push a patch of the head's OWN vertices instead of attaching a new
   // mesh. Original positions are cached once; applyTraits() rebuilds the
   // buffer from that cache each call (never compounds).
@@ -134,6 +136,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     new THREE.Vector3(-0.85, 0.25, -0.35).normalize(),
     new THREE.Vector3(0.85, 0.25, -0.35).normalize(),
   ];
+  // Horns used to be fire's second effect; moved to "dark" (devil-horn
+  // imagery fits a dark/shadow theme better than fire, and fire is now
+  // meant to stay a single clean effect — the flame orb).
   const HORN_DIRS = [
     new THREE.Vector3(-0.5, 0.78, 0.15).normalize(),
     new THREE.Vector3(0.5, 0.78, 0.15).normalize(),
@@ -142,7 +147,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   const quillVerts = canMorph ? collectMorphRegion(headGeo, QUILL_DIRS, 0.9) : [];
   const hornVerts = canMorph ? collectMorphRegion(headGeo, HORN_DIRS, 0.93) : [];
 
-  function applyHeadMorph(speedT, fireT) {
+  function applyHeadMorph(speedT, darkT) {
     const pos = headGeo.attributes.position;
     pos.array.set(headOriginalPos);
     const push = (entries, amount) => {
@@ -152,7 +157,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       }
     };
     push(quillVerts, 0.26 * speedT);
-    push(hornVerts, 0.32 * fireT);
+    push(hornVerts, 0.32 * darkT);
     pos.needsUpdate = true;
     headGeo.computeVertexNormals();
   }
@@ -176,7 +181,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   const eyeL = makeEye(-0.16);
   const eyeR = makeEye(0.16);
 
-  // --- tail (present from age 1, a Chao staple) ----------------------------
+  // --- tail (present from age 1, a Kibi staple) ----------------------------
   const tailMat = track(lowPolyMaterial(NEUTRAL_COLOR));
   const tail = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.09, 1)), tailMat);
   tail.scale.set(0.65, 0.65, 2.4);
@@ -186,8 +191,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
 
   // --- age 2+: arms and legs — soft embedded blobs, reaching forward -------
   const limbs = [];
-  let armL, armR, legL, legR, legMeshL, legMeshR;
-  const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
+  let armL, armR, legL, legR, armMeshL, armMeshR, legMeshL, legMeshR;
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(NEUTRAL_COLOR));
     const armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
@@ -204,11 +208,12 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
       return { pivot, mesh };
     }
 
-    const armSideL = makeLimb(armGeo, [0.22, 0.27, 0.15], [1, 0.8, 0.95]);
-    const armSideR = makeLimb(armGeo, [-0.22, 0.27, 0.15], [1, 0.8, 0.95]);
+    const armSideL = makeLimb(armGeo, [0.22, 0.27, 0.15], ARM_BASE_SCALE);
+    const armSideR = makeLimb(armGeo, [-0.22, 0.27, 0.15], ARM_BASE_SCALE);
     const legSideL = makeLimb(legGeo, [0.14, 0.06, 0.11], LEG_BASE_SCALE);
     const legSideR = makeLimb(legGeo, [-0.14, 0.06, 0.11], LEG_BASE_SCALE);
     armL = armSideL.pivot; armR = armSideR.pivot;
+    armMeshL = armSideL.mesh; armMeshR = armSideR.mesh;
     legL = legSideL.pivot; legR = legSideR.pivot;
     legMeshL = legSideL.mesh; legMeshR = legSideR.mesh;
   }
@@ -244,16 +249,13 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   // --- element accessories ---------------------------------------------------
   // fire: a floating orb with a two-tone flame rising out of it — like an
   // upside-down ice-cream cone (scoop/orb at the bottom, cone tip up)
-  // hovering just above the head, centered (previous version had a stray
-  // x-offset that read as "off-center").
+  // hovering just above the head, centered. Round-17 feedback: the orb read
+  // as bigger than the cone (a ball dominating a tiny flame) — the orb is
+  // now clearly smaller than the cone's own base so the flame silhouette
+  // dominates and the orb reads as a small anchor/ember, not the main shape.
   const flameGroup = new THREE.Group();
   const flameBaseY = headTopY + 0.14;
   flameGroup.position.set(0, flameBaseY, 0);
-  // Orb shares flameOuterMat's exact color scheme (not its own accent-based
-  // one) so the orb and the cone's base read as one continuous flame body,
-  // with only the inner cone standing out as the bright tip — and the orb
-  // now pulses in update() the same way the cones already did, instead of
-  // sitting static while everything around it flickers.
   const flameOuterMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.fire.color,
     emissive: ELEMENT_INFO.fire.color,
@@ -270,12 +272,14 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     transparent: true,
     opacity: 0,
   }));
-  const orb = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.088, 1)), flameOuterMat);
+  // Orb shares flameOuterMat (not its own material) so it's guaranteed to
+  // match the cone's color and flicker in lockstep, not just approximately.
+  const orb = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.05, 1)), flameOuterMat);
   flameGroup.add(orb);
-  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.06, 0.17, 6)), flameOuterMat);
-  flameOuter.position.y = 0.095;
-  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.035, 0.1, 6)), flameInnerMat);
-  flameInner.position.y = 0.125;
+  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.075, 0.2, 6)), flameOuterMat);
+  flameOuter.position.y = 0.09;
+  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.042, 0.12, 6)), flameInnerMat);
+  flameInner.position.y = 0.13;
   flameGroup.add(flameOuter, flameInner);
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
@@ -297,13 +301,10 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   gem.scale.setScalar(0.01);
   group.add(gem);
 
-  // nature: dark sharp thorn spikes — replaces both the old leaf sprout
-  // (user: "still dont like the little leaf ears") and the old top-of-arm
-  // vertex-morph thorns (user: wrong side, invisible/clipping into the
-  // head). Real small meshes now, not a vertex morph, specifically because
-  // a darker accent color ("make the thorns a little darker so they pop")
-  // needs its own material — a shared-material vertex displacement can't
-  // differ in color from the skin it's part of.
+  // nature: dark sharp thorn spikes — a real mesh, not a vertex morph,
+  // because the darker accent color needs its own material (a
+  // shared-material vertex displacement can't differ in color from the
+  // skin it's part of).
   const thornColor = new THREE.Color(ELEMENT_INFO.nature.color).multiplyScalar(0.45);
   const thornMat = track(new THREE.MeshStandardMaterial({
     color: thornColor,
@@ -314,16 +315,10 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     opacity: 0,
     roughness: 0.6,
   }));
-  // Round-16 feedback: the spine row read as a straight line floating off
-  // the body (not attached) and clipped through the tail. Fatter/shorter
-  // now (a hedgehog quill, not a needle), and placed as an actual patch
-  // covering the upper-to-mid back — positions computed as points ON the
-  // torso's own sphere surface (center + direction*radius), each rotated
-  // via quaternion to point straight out along that same direction, so
-  // every thorn actually roots into the body instead of floating at a
-  // fixed depth regardless of the surface's curve. Directions stay clear
-  // of the tail's mount zone (x≈0, y below center).
-  const thornGeo = track(new THREE.ConeGeometry(0.07, 0.13, 5));
+  // Round-18 feedback: bumped "ever so slightly" bigger again, and a
+  // wider/further-out pair added at the base to reinforce a triangular
+  // (wide base, narrow crown) spread across the back.
+  const thornGeo = track(new THREE.ConeGeometry(0.078, 0.145, 5));
   const thorns = [];
   function makeThorn(parent, pos, quat, scale) {
     const t = new THREE.Mesh(thornGeo, thornMat);
@@ -346,6 +341,8 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     { dir: new THREE.Vector3(-0.4, 0.12, -0.85), s: 0.85 },
     { dir: new THREE.Vector3(0.22, -0.15, -0.9), s: 0.8 },
     { dir: new THREE.Vector3(-0.22, -0.15, -0.9), s: 0.8 },
+    { dir: new THREE.Vector3(0.55, -0.02, -0.72), s: 0.85 }, // new wide-base pair —
+    { dir: new THREE.Vector3(-0.55, -0.02, -0.72), s: 0.85 }, // triangle "corners"
   ];
   for (const spec of spineSpecs) {
     const d = spec.dir.clone().normalize();
@@ -354,13 +351,30 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     const quat = new THREE.Quaternion().setFromUnitVectors(upAxis, d);
     makeThorn(group, pos, quat, spec.s);
   }
-  // Arms (age 2+ only): two thorns on the back of each arm, in the pivot so
-  // they inherit the running-gait swing.
+  // Arms (age 2+ only), in the pivot so they inherit the running-gait swing.
+  // Round-18 feedback: the previous mostly-(-Z) direction placed them
+  // geometrically INSIDE the torso's own ellipsoid at this arm position
+  // (verified by hand: world position landed well within the body's
+  // radius), which is why they were invisible/clipping rather than just
+  // "hard to see." These directions lean hard toward +/-X (away from the
+  // body's center, matching the outward side of each mirrored arm) as well
+  // as back, which clears the torso.
   if (age >= 2) {
-    makeThorn(armL, [0, 0.03, -0.15], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, 0.3, -0.95).normalize()), 0.95);
-    makeThorn(armL, [0, -0.06, -0.14], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, -0.2, -0.98).normalize()), 0.8);
-    makeThorn(armR, [0, 0.03, -0.15], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, 0.3, -0.95).normalize()), 0.95);
-    makeThorn(armR, [0, -0.06, -0.14], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, -0.2, -0.98).normalize()), 0.8);
+    const armRadius = 0.12;
+    const armThornSpecs = [
+      { dir: new THREE.Vector3(0.75, 0.15, -0.6), s: 1 },
+      { dir: new THREE.Vector3(0.65, -0.25, -0.65), s: 0.8 },
+    ];
+    for (const { dir, s } of armThornSpecs) {
+      const d = dir.clone().normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(upAxis, d);
+      const posL = [d.x * armRadius * 1.15, d.y * armRadius * 1.15, d.z * armRadius * 1.15];
+      makeThorn(armL, posL, quat, s);
+      const dMirrored = new THREE.Vector3(-d.x, d.y, d.z);
+      const quatR = new THREE.Quaternion().setFromUnitVectors(upAxis, dMirrored);
+      const posR = [dMirrored.x * armRadius * 1.15, dMirrored.y * armRadius * 1.15, dMirrored.z * armRadius * 1.15];
+      makeThorn(armR, posR, quatR, s);
+    }
   }
 
   const skinMeshes = [body, head, tail, ...limbs, wingL, wingR];
@@ -417,9 +431,11 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     const nature = traits.nature ?? 0;
     const speed = traits.speed ?? 0;
     const fairy = traits.fairy ?? 0;
+    const ground = traits.ground ?? 0;
+    const dark = traits.dark ?? 0;
 
-    // fire -> floating flame orb grows in, centered above the head, AND
-    // small horns pull out of the head's own vertices near the temples.
+    // fire -> floating flame orb grows in, centered above the head. (Just
+    // the orb now — horns moved to "dark", see below.)
     const fireT = Math.min(fire * 1.2, 1);
     flameOuterMat.opacity = fireT; // orb shares this material, so it's covered too
     flameInnerMat.opacity = fireT;
@@ -433,10 +449,26 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     }
     gemMat.opacity = water;
     gem.scale.setScalar(0.01 + water * 1.1);
+
+    // ground -> bulkier build. Scales the body/head mass and the limbs up
+    // together (multiplied onto their own base scale, not replacing it) —
+    // a stockier, heavier-set physique rather than a uniform "everything
+    // bigger" blow-up.
+    const bulk = 1 + ground * 0.22;
+    if (isSolo) {
+      body.scale.setScalar(bulk);
+    } else {
+      body.scale.set(bulk, 0.9 * bulk, bulk);
+      head.scale.set(bulk, bulk, bulk);
+    }
+    if (armMeshL) {
+      armMeshL.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
+      armMeshR.scale.set(ARM_BASE_SCALE[0] * bulk, ARM_BASE_SCALE[1] * bulk, ARM_BASE_SCALE[2] * bulk);
+    }
     if (legMeshL) {
       const [sx, sy, sz] = LEG_BASE_SCALE;
-      legMeshL.scale.set(sx * (1 + water * 0.55), sy * (1 - water * 0.4), sz * (1 + water * 0.7));
-      legMeshR.scale.set(sx * (1 + water * 0.55), sy * (1 - water * 0.4), sz * (1 + water * 0.7));
+      legMeshL.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
+      legMeshR.scale.set(sx * (1 + water * 0.55) * bulk, sy * (1 - water * 0.4) * bulk, sz * (1 + water * 0.7) * bulk);
     }
 
     // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
@@ -444,8 +476,9 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     for (const th of thorns) th.scale.setScalar(0.01 + nature * (th.userData.baseScale ?? 1));
 
     // speed -> the head's own vertices at the back/crown pull outward into
-    // swept quills (Sonic/Shadow-style) instead of a separate mesh.
-    applyHeadMorph(speed, fire);
+    // swept quills (Sonic/Shadow-style). dark -> small devil horns pull
+    // out of the head's own vertices near the temples (moved from fire).
+    applyHeadMorph(speed, dark);
 
     // fairy -> wings (also guaranteed present at age 3+ regardless of this
     // trait), tinted pink as the trait grows.
@@ -462,8 +495,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     if (isSolo) {
       // Rocks side to side in place with a squash on each "landing" — this
       // was the cube's flop animation; the cube shape itself is shelved for
-      // now, but the motion reads well for the sphere too and was simpler
-      // to reason about than the old front-back roll.
+      // now, but the motion reads well for the sphere too.
       const rockPhase = t * 1.15;
       group.rotation.z = Math.sin(rockPhase) * 0.55;
       const landing = Math.pow(Math.abs(Math.sin(rockPhase)), 8);
@@ -503,9 +535,6 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     if (flameOuterMat.opacity > 0.01) {
       const flicker = 1 + Math.sin(t * 9) * 0.08;
       flameOuter.scale.set(flicker, 1 + Math.sin(t * 7) * 0.12, flicker);
-      // orb shares flameOuterMat, so its glow already pulses with the cone's
-      // emissiveIntensity below — it just needs its own gentle scale pulse
-      // (a different phase so it doesn't move in lockstep with the cone).
       const orbPulse = 1 + Math.sin(t * 5.5) * 0.06;
       orb.scale.setScalar(orbPulse);
       flameOuterMat.emissiveIntensity = 1 + Math.sin(t * 9) * 0.25;
@@ -542,7 +571,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     for (const obj of disposables) obj.dispose?.();
   }
 
-  applyTraits({ fire: 0, water: 0, nature: 0, speed: 0, fairy: 0 });
+  applyTraits({ fire: 0, water: 0, nature: 0, speed: 0, fairy: 0, ground: 0, dark: 0 });
 
   return { group, applyTraits, update, dispose };
 }
