@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createKibi } from './kibi.js';
 import { createCollectionOrb } from './collectionOrb.js';
+import { createSatoshiOrb } from './satoshiOrb.js';
 import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits, MAJOR_ELEMENTS, MINOR_ELEMENTS, MISC_ELEMENTS } from './traits.js';
 import './style.css';
 
@@ -71,9 +72,10 @@ rebuildKibi();
 // left out: it isn't part of the color scheme (see MISC_ELEMENTS) and
 // doesn't have a "seed" of its own yet.
 const orbElements = [...MAJOR_ELEMENTS, ...MINOR_ELEMENTS];
+const ORB_SLOTS = orbElements.length + 1; // +1 for the satoshi orb below, so all orbs share one evenly-spaced ring
 const orbs = orbElements.map((el, i) => {
   const orb = createCollectionOrb(el);
-  const angle = (i / orbElements.length) * Math.PI * 2;
+  const angle = (i / ORB_SLOTS) * Math.PI * 2;
   const r = 1.7;
   orb.group.position.set(Math.cos(angle) * r, 0.26, Math.sin(angle) * r);
   orb.group.traverse((obj) => {
@@ -82,6 +84,20 @@ const orbs = orbElements.map((el, i) => {
   scene.add(orb.group);
   return orb;
 });
+
+// One extra, non-elemental collectible: a smaller Bitcoin-orange "satoshi"
+// orb, taking the last slot in the same ring.
+const satoshiOrb = createSatoshiOrb();
+{
+  const angle = (orbElements.length / ORB_SLOTS) * Math.PI * 2;
+  const r = 1.7;
+  satoshiOrb.group.position.set(Math.cos(angle) * r, 0.18, Math.sin(angle) * r);
+  satoshiOrb.group.traverse((obj) => {
+    if (obj.isMesh) obj.castShadow = true;
+  });
+  scene.add(satoshiOrb.group);
+}
+orbs.push(satoshiOrb);
 
 // Dev-only hook: reliable state setter for scripted screenshot/testing tools,
 // since driving <input type="range">/radio elements from outside the page is
