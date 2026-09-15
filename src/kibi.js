@@ -302,7 +302,12 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   // a raw icosahedron), so raising flameBaseY a small amount above the
   // head's own top is enough to clear it with no overlap/clipping.
   const flameGroup = new THREE.Group();
-  const flameBaseY = headTopY + 0.03;
+  // `let`, not `const` — recomputed in applyTraits() as the ground trait
+  // scales the head, so the flame's mount point rises with the head's
+  // actual (currently-scaled) top surface instead of staying pinned to
+  // where the head's top was at ground=0 and getting swallowed as the
+  // head grows past it.
+  let flameBaseY = headTopY + 0.03;
   flameGroup.position.set(0, flameBaseY, 0);
   const flameMat = track(new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -525,6 +530,15 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       legR.position.set(-LEG_PIVOT_BASE[0] * bulk, LEG_PIVOT_BASE[1] * bulk, LEG_PIVOT_BASE[2] * bulk);
     }
     tail.scale.set(0.65 * bulk, 0.65 * bulk, 1.7 * bulk);
+    // The flame and gem are mounted at fixed points computed from the
+    // head's/body's UNSCALED radius at construction time — without this,
+    // ground growing the head/body past those fixed points makes the flame
+    // sink into the head and the gem sink into the chest at high ground
+    // values (found in review). Recompute both anchors from the meshes'
+    // actual current (scaled) surface each call: offset-from-center * bulk,
+    // added back onto the center itself (which doesn't move, only scales).
+    flameBaseY = head.position.y + (headTopY - head.position.y + 0.03) * bulk;
+    gem.position.set(0, body.position.y + (chestY - body.position.y) * bulk, chestZ * bulk);
 
     // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
     thornMat.opacity = Math.min(nature * 1.2, 1);
