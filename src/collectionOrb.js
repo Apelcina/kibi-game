@@ -137,9 +137,9 @@ export function createCollectionOrb(element) {
 
   const scanPhase = Math.random() * Math.PI * 2; // stagger multiple orbs so their scans don't sync up
   const SCAN_RANGE = OUTER_RADIUS * 0.95; // stay just inside the poles along scanAxis
-  const SCAN_SIGMA = OUTER_RADIUS * 0.16; // glow band width — narrow enough to read as a
-                                           // distinct passing band, not a wide wash that
-                                           // just blends into the gradient's own light end
+  const SCAN_SIGMA = OUTER_RADIUS * 0.09; // glow band width — thin, per feedback
+  const SCAN_SHARPNESS = 1.8; // >1 steepens the falloff beyond the raw gaussian, so the
+                               // edge reads as a crisp line rather than a soft, wide glow
   const c = new THREE.Color();
 
   function update(dt, t) {
@@ -153,7 +153,8 @@ export function createCollectionOrb(element) {
     let maxIntensity = 0;
     for (let i = 0; i < outerCount; i++) {
       const dist = axisProj[i] - bandCenter;
-      const intensity = Math.exp(-(dist * dist) / (2 * SCAN_SIGMA * SCAN_SIGMA));
+      const raw = Math.exp(-(dist * dist) / (2 * SCAN_SIGMA * SCAN_SIGMA));
+      const intensity = Math.pow(raw, SCAN_SHARPNESS);
       if (intensity > maxIntensity) maxIntensity = intensity;
       c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2]).lerp(scanColor, intensity);
       liveColors[i * 3] = c.r;
