@@ -5,9 +5,18 @@ import { ELEMENT_INFO } from './traits.js';
 // display object per element, previewing what an as-yet-unbuilt collection/
 // inventory system would show. Two nested spheres:
 //   outer: semi-transparent shell, a dark(bottom)->light(top) vertical
-//          vertex-color gradient of the element's own color, with a thin
-//          bright ring that sweeps top<->bottom tracing the shell's own
-//          curved cross-section (not just a flat disc floating through it).
+//          vertex-color gradient of the element's own color, with a soft
+//          bright glow band that sweeps across it. The scan is painted
+//          directly into the shell's OWN per-vertex colors (not a separate
+//          ring prop floating in front of it) — a first version used a
+//          literal torus mesh and read as "a white circle going up and
+//          down," disconnected from the sphere underneath. Blending the
+//          highlight into the gradient itself, with a soft falloff instead
+//          of a hard edge, makes it look like the shell's own surface is
+//          catching light as the band passes, not a separate object
+//          overlaid on top. The sweep axis is tilted a bit off vertical
+//          (randomized per orb) so it reads as a natural diagonal scan
+//          rather than a mechanical straight up-down.
 //   inner: a small solid, more saturated core — with a tiny low-poly
 //          sprout (stem + two leaves, in the element's ACCENT color)
 //          growing out of its top, so it reads as a seed germinating
@@ -33,29 +42,50 @@ export function createCollectionOrb(element) {
   const darkColor = baseColor.clone().multiplyScalar(0.55);
   const lightColor = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.45);
   const accentColor = new THREE.Color(info.accent);
+  const scanColor = lightColor.clone().lerp(new THREE.Color(0xffffff), 0.7);
 
-  // --- outer shell: semi-transparent, dark(bottom)->light(top) gradient ---
+  // --- outer shell: semi-transparent, dark(bottom)->light(top) gradient, --
+  // plus a live glow band blended into these same per-vertex colors (see
+  // update() below) rather than a separate mesh.
   const outerGeo = track(lowPolySphere(OUTER_RADIUS, 1));
+  const outerPos = outerGeo.attributes.position;
+  const outerCount = outerPos.count;
+  const baseColors = new Float32Array(outerCount * 3); // static gradient, computed once
+  const liveColors = new Float32Array(outerCount * 3); // baseColors + this frame's glow band
+  // Sweep axis: mostly vertical but tilted a bit off-axis (random per orb,
+  // both how far off vertical and which horizontal direction) so the scan
+  // reads as a natural diagonal pass across the shell rather than a
+  // perfectly straight, mechanical up-down sweep.
+  const scanTiltAngle = 0.22 + Math.random() * 0.16; // ~13-22 degrees off vertical
+  const scanTiltDir = Math.random() * Math.PI * 2;
+  const scanAxis = new THREE.Vector3(
+    Math.sin(scanTiltAngle) * Math.cos(scanTiltDir),
+    Math.cos(scanTiltAngle),
+    Math.sin(scanTiltAngle) * Math.sin(scanTiltDir),
+  ).normalize();
+  const axisProj = new Float32Array(outerCount); // each vertex's position along scanAxis, cached
   {
-    const pos = outerGeo.attributes.position;
     let minY = Infinity;
     let maxY = -Infinity;
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
+    for (let i = 0; i < outerCount; i++) {
+      const y = outerPos.getY(i);
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
     const range = maxY - minY || 1;
-    const colors = new Float32Array(pos.count * 3);
     const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      const t = (pos.getY(i) - minY) / range;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < outerCount; i++) {
+      const t = (outerPos.getY(i) - minY) / range;
       c.copy(darkColor).lerp(lightColor, t);
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
+      baseColors[i * 3] = c.r;
+      baseColors[i * 3 + 1] = c.g;
+      baseColors[i * 3 + 2] = c.b;
+      v.fromBufferAttribute(outerPos, i);
+      axisProj[i] = v.dot(scanAxis);
     }
-    outerGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    liveColors.set(baseColors);
+    outerGeo.setAttribute('color', new THREE.BufferAttribute(liveColors, 3));
   }
   const outerMat = track(new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -71,28 +101,6 @@ export function createCollectionOrb(element) {
   }));
   const outer = new THREE.Mesh(outerGeo, outerMat);
   group.add(outer);
-
-  // --- scan ring: sweeps top<->bottom, sized to the shell's own cross- ---
-  // section radius at its current height (a sphere's silhouette narrows
-  // toward the poles), so it reads as tracing the shell's curved surface
-  // rather than a flat disc of constant size passing through it.
-  const scanColor = lightColor.clone().lerp(new THREE.Color(0xffffff), 0.5);
-  const scanMat = track(new THREE.MeshStandardMaterial({
-    color: scanColor,
-    emissive: scanColor,
-    emissiveIntensity: 1.1,
-    transparent: true,
-    opacity: 0.85,
-    flatShading: true,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  }));
-  const SCAN_TUBE_RADIUS = 0.012;
-  const SCAN_BASE_RADIUS = OUTER_RADIUS * 0.98; // just inside the shell's own radius
-  const scanGeo = track(new THREE.TorusGeometry(SCAN_BASE_RADIUS, SCAN_TUBE_RADIUS, 6, 20));
-  const scanRing = new THREE.Mesh(scanGeo, scanMat);
-  scanRing.rotation.x = Math.PI / 2; // lay flat (horizontal)
-  group.add(scanRing);
 
   // --- inner core: solid, saturated, with a tiny seedling sprout ---------
   const innerMat = track(new THREE.MeshStandardMaterial({
@@ -128,20 +136,32 @@ export function createCollectionOrb(element) {
   makeLeaf(1);
 
   const scanPhase = Math.random() * Math.PI * 2; // stagger multiple orbs so their scans don't sync up
-  const SCAN_Y_RANGE = OUTER_RADIUS * 0.92; // stay just inside the poles
+  const SCAN_RANGE = OUTER_RADIUS * 0.95; // stay just inside the poles along scanAxis
+  const SCAN_SIGMA = OUTER_RADIUS * 0.32; // glow band width (soft falloff, not a hard edge)
+  const c = new THREE.Color();
 
   function update(dt, t) {
     inner.rotation.y += dt * 0.5;
     group.rotation.y += dt * 0.18;
 
-    // Ping-pongs top<->bottom (sin, not a sawtooth) — a smooth continuous
-    // idle loop with no hard reset, matching this project's other idle
-    // animations (blink, bob, flicker, flutter).
-    const y = Math.sin(t * 0.8 + scanPhase) * SCAN_Y_RANGE;
-    scanRing.position.y = y;
-    const crossR = Math.sqrt(Math.max(SCAN_Y_RANGE * SCAN_Y_RANGE - y * y, 0.0001));
-    const k = crossR / SCAN_BASE_RADIUS;
-    scanRing.scale.set(k, k, 1);
+    // Ping-pongs along the (tilted) scan axis — sin, not a sawtooth, for a
+    // smooth continuous idle loop with no hard reset, matching this
+    // project's other idle animations (blink, bob, flicker, flutter).
+    const bandCenter = Math.sin(t * 0.8 + scanPhase) * SCAN_RANGE;
+    let maxIntensity = 0;
+    for (let i = 0; i < outerCount; i++) {
+      const dist = axisProj[i] - bandCenter;
+      const intensity = Math.exp(-(dist * dist) / (2 * SCAN_SIGMA * SCAN_SIGMA));
+      if (intensity > maxIntensity) maxIntensity = intensity;
+      c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2]).lerp(scanColor, intensity * 0.8);
+      liveColors[i * 3] = c.r;
+      liveColors[i * 3 + 1] = c.g;
+      liveColors[i * 3 + 2] = c.b;
+    }
+    outerGeo.attributes.color.needsUpdate = true;
+    // The whole shell brightens a touch as the band passes through it,
+    // reinforcing that this is light catching the surface, not a decal.
+    outerMat.emissiveIntensity = 0.12 + maxIntensity * 0.35;
   }
 
   function dispose() {
