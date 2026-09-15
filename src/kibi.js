@@ -513,56 +513,58 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
                 // but referenced later (wings) too, so it's hoisted to function scope
 
   function applyTraits(traits) {
-    // Two-major-color scheme, replacing the earlier "one blended color per
-    // part" system. Every active trait is ranked by value; the top 2 become
-    // the two "major" gradient-endpoint colors. Every remaining (minor)
-    // trait is folded into exactly ONE of those two — never split across
-    // both — alternating which major color gets the next-strongest minor
-    // (a "staggered" assignment) so, e.g. with red/green as majors and
-    // blue/yellow as minors, you get red+blue blended into one endpoint and
-    // green+yellow into the other, rather than one muddy 4-way average.
-    // Each body part then paints those two RESULTING colors as a gradient
-    // across its own local geometry (see applyGradientColors) — the
-    // "banana/apple" look: two colors, one continuous blend across the
-    // shape, computed fresh per part from that part's own vertex extents.
-    const entries = ELEMENTS.filter((el) => el !== 'fairy')
-      .map((el) => ({ el, v: traits[el] ?? 0 }))
-      .filter((e) => e.v > 0.001)
-      .sort((a, b) => b.v - a.v);
-    const total = entries.reduce((s, e) => s + e.v, 0);
+    // Two-color scheme, FIXED category membership rather than rank. Two
+    // earlier versions both tied slot membership to relative trait VALUE
+    // (top-2 by rank, then a fully continuous value-weighted version) — and
+    // both had a real problem: whenever which color counted as "dominant"
+    // depends on comparing values, two traits being close in value forces a
+    // choice between a discrete identity swap (rank version) or a genuinely
+    // muddy blend across a wide near-tie zone (continuous version), because
+    // there's no principled tiebreak based on value alone.
+    // Fixed instead: every element has a PERMANENT slot, decided by what it
+    // is, not by how strong it currently is — fire/ground/dark/water always
+    // feed the back/dominant color, nature/speed always feed the front/
+    // belly accent. Nothing here ever compares one trait's value against
+    // another's to decide membership, so there is no crossover to snap at:
+    // each slot is just a continuous weighted blend of its OWN fixed
+    // members, which shifts smoothly as those specific values change.
+    const BACK_ELEMENTS = ['fire', 'ground', 'dark', 'water'];
+    const FRONT_ELEMENTS = ['nature', 'speed'];
+    const CATEGORY_POWER = 1.6; // within a slot, still lean toward that
+                                 // slot's own strongest active member rather
+                                 // than a flat average of its whole category.
+
+    const total = ELEMENTS.filter((el) => el !== 'fairy').reduce((s, el) => s + (traits[el] ?? 0), 0);
     const strength = Math.min(total, 1);
     const neutral = new THREE.Color(NEUTRAL_COLOR);
 
-    const GROUP_POWER = 1.6; // within a group, exaggerate the gap so the
-                              // group's own strongest member still reads as
-                              // dominant rather than a flat average.
-    function groupColor(group) {
-      if (group.length === 0) return neutral.clone();
-      const weighted = group.map((e) => ({ c: new THREE.Color(ELEMENT_INFO[e.el].color), w: Math.pow(e.v, GROUP_POWER) }));
+    function categoryColor(elementList) {
+      const active = elementList.map((el) => ({ el, v: traits[el] ?? 0 })).filter((e) => e.v > 0.001);
+      if (active.length === 0) return null;
+      const weighted = active.map((e) => ({ c: new THREE.Color(ELEMENT_INFO[e.el].color), w: Math.pow(e.v, CATEGORY_POWER) }));
       const wsum = weighted.reduce((s, e) => s + e.w, 0) || 1;
       const c = new THREE.Color(0, 0, 0);
       for (const e of weighted) c.add(e.c.multiplyScalar(e.w / wsum));
       return c;
     }
 
-    const groupA = entries.length > 0 ? [entries[0]] : [];
-    const groupB = entries.length > 1 ? [entries[1]] : [];
-    for (let i = 2; i < entries.length; i++) {
-      (i % 2 === 0 ? groupA : groupB).push(entries[i]);
+    let colorA = categoryColor(BACK_ELEMENTS);
+    let colorB = categoryColor(FRONT_ELEMENTS);
+    if (colorA && !colorB) {
+      // Nothing in the front category active: soft-belly highlight is just
+      // a lighter tint of the back color, same fallback idea as before.
+      colorB = colorA.clone().lerp(new THREE.Color(0xffffff), 0.4);
+    } else if (!colorA && colorB) {
+      // Nothing in the back category active: the back becomes a slightly
+      // darker/muted tint of the front color, so it doesn't fall back to a
+      // flat neutral body with only the belly colored.
+      colorA = colorB.clone().lerp(new THREE.Color(0x000000), 0.25);
+    } else if (!colorA && !colorB) {
+      colorA = neutral.clone();
+      colorB = neutral.clone();
     }
-    // colorA is the dominant/back color — it covers most of each part's
-    // surface (see FRONT_BAND in applyGradientColors), so it needs to stay
-    // clearly readable as itself, not averaged down.
-    const colorA = groupColor(groupA).lerp(neutral, 1 - strength);
-    // colorB is the front/belly accent. With a real second trait active it's
-    // that trait's (possibly minor-blended) color; with only one trait
-    // active there's nothing to blend toward, so previously this fell back
-    // to the flat neutral (a light beige) — which read as "pink body, white
-    // belly," i.e. not clearly red at all. A lighter TINT of colorA itself
-    // reads as a natural soft-belly highlight of the SAME color instead.
-    const colorB = groupB.length > 0
-      ? groupColor(groupB).lerp(neutral, 1 - strength)
-      : colorA.clone().lerp(new THREE.Color(0xffffff), 0.4);
+    colorA.lerp(neutral, 1 - strength);
+    colorB.lerp(neutral, 1 - strength);
 
     // No uniform emissive tint on the gradient parts (there used to be one,
     // colored by the blended trait color): a material's emissive is ONE
