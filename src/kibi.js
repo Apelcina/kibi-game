@@ -612,6 +612,25 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
   let bulk = 1; // current ground "zoom" factor — computed in the ground block below,
                 // but referenced later (wings) too, so it's hoisted to function scope
+
+  // --- idle fidgets (age 2+ only, see update()) ---------------------------
+  // After standing still for a random while, occasionally play a small
+  // gesture instead of just holding a neutral rest pose — per feedback:
+  // "might just stand there, or think and look up and to the side, raise
+  // their arm, or sit down." fidget.type is null between gestures (plain
+  // idle); FIDGET_POOL picks the next one once fidget.wait counts down.
+  const FIDGET_POOL = ['look', 'wave', 'sit'];
+  const FIDGET_DURATION = { look: 2.2, wave: 1.8, sit: 4.5 };
+  const FIDGET_WAIT_MIN = 4;
+  const FIDGET_WAIT_MAX = 9;
+  const fidget = { type: null, elapsed: 0, duration: 0, sign: 1, wait: randomFidgetWait() };
+  function randomFidgetWait() {
+    return FIDGET_WAIT_MIN + Math.random() * (FIDGET_WAIT_MAX - FIDGET_WAIT_MIN);
+  }
+  function smooth01(x) {
+    const s = Math.min(1, Math.max(0, x));
+    return s * s * (3 - 2 * s);
+  }
   // Accumulated (not wall-clock) phase for the solo rock — dt-integrated so
   // switching its speed (idle vs walking, see update()) changes the RATE
   // smoothly without a jump, unlike `t * speed` which would snap to a
@@ -964,12 +983,76 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
         const STEP_AMPLITUDE = 0.6;
         speedMultiplier = 1 - STEP_AMPLITUDE * Math.cos(2 * runPhase);
       } else {
-        const ease = Math.min(1, dt * 8);
-        legL.rotation.x *= 1 - ease;
-        legR.rotation.x *= 1 - ease;
-        armL.rotation.x *= 1 - ease;
-        armR.rotation.x *= 1 - ease;
-        head.rotation.x *= 1 - ease;
+        // Idle: advance the fidget state machine (see FIDGET_POOL above),
+        // then ease every rotation toward whatever the current fidget
+        // wants (0 for all of them when no fidget is playing, i.e. plain
+        // standing-still) — same ease-toward-target approach as before,
+        // just generalized from "always ease to 0" to "ease to target".
+        if (!fidget.type) {
+          fidget.wait -= dt;
+          if (fidget.wait <= 0) {
+            fidget.type = FIDGET_POOL[Math.floor(Math.random() * FIDGET_POOL.length)];
+            fidget.elapsed = 0;
+            fidget.duration = FIDGET_DURATION[fidget.type];
+            fidget.sign = Math.random() < 0.5 ? 1 : -1;
+          }
+        } else {
+          fidget.elapsed += dt;
+          if (fidget.elapsed >= fidget.duration) {
+            fidget.type = null;
+            fidget.wait = randomFidgetWait();
+          }
+        }
+
+        // Envelope: ease in over the first quarter, hold, ease out over the
+        // last quarter — so a gesture settles in and out smoothly rather
+        // than snapping to/from its pose.
+        let env = 0;
+        if (fidget.type) {
+          const p = fidget.elapsed / fidget.duration;
+          env = Math.min(smooth01(p / 0.25), smooth01((1 - p) / 0.25));
+        }
+
+        let targetHeadX = 0;
+        let targetHeadY = 0;
+        let targetArmLx = 0;
+        let targetArmRx = 0;
+        let targetArmLz = 0;
+        let targetArmRz = 0;
+        let targetLegX = 0;
+        if (fidget.type === 'look') {
+          // Tilts the head up and turns it to a random side, like thinking.
+          targetHeadX = -0.35 * env;
+          targetHeadY = 0.4 * env * fidget.sign;
+        } else if (fidget.type === 'wave') {
+          // Raises one arm (random side) out from Kibi's hanging-at-the-
+          // sides rest pose, with a little wiggle once it's up.
+          const wiggle = Math.sin(fidget.elapsed * 10) * 0.15 * env;
+          if (fidget.sign > 0) {
+            targetArmLz = 1.9 * env;
+            targetArmLx = wiggle;
+          } else {
+            targetArmRz = -1.9 * env;
+            targetArmRx = wiggle;
+          }
+        } else if (fidget.type === 'sit') {
+          // Legs tuck forward/under and the head dips slightly, like
+          // settling down to rest — no body/group position or scale
+          // change (those are already claimed by the breathing pulse
+          // above), so this stays a pure leg+head pose.
+          targetLegX = 0.9 * env;
+          targetHeadX = -0.1 * env;
+        }
+
+        const ease = Math.min(1, dt * 6);
+        legL.rotation.x += (targetLegX - legL.rotation.x) * ease;
+        legR.rotation.x += (targetLegX - legR.rotation.x) * ease;
+        armL.rotation.x += (targetArmLx - armL.rotation.x) * ease;
+        armR.rotation.x += (targetArmRx - armR.rotation.x) * ease;
+        armL.rotation.z += (targetArmLz - armL.rotation.z) * ease;
+        armR.rotation.z += (targetArmRz - armR.rotation.z) * ease;
+        head.rotation.x += (targetHeadX - head.rotation.x) * ease;
+        head.rotation.y += (targetHeadY - head.rotation.y) * ease;
       }
     }
     return speedMultiplier;
