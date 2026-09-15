@@ -538,31 +538,39 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const strength = Math.min(total, 1);
     const neutral = new THREE.Color(NEUTRAL_COLOR);
 
-    function categoryColor(elementList) {
+    // categoryBlend returns the category's "pure" hue (its members' weighted
+    // blend, ignoring how small their values are — same continuous mixing as
+    // before) PLUS a separate `presence` (0..1, this category's own total
+    // value). Keeping these separate is what fixes the snap: a category with
+    // one newly-active member used to jump straight from "absent" to "100%
+    // represented" the instant that member crossed the 0.001 threshold,
+    // because the weighted average normalizes to 1 even for a single tiny
+    // value. `presence` now scales how much that pure hue actually shows,
+    // so a trait fading in from 0 fades its category's color in with it.
+    function categoryBlend(elementList) {
       const active = elementList.map((el) => ({ el, v: traits[el] ?? 0 })).filter((e) => e.v > 0.001);
-      if (active.length === 0) return null;
-      const weighted = active.map((e) => ({ c: new THREE.Color(ELEMENT_INFO[e.el].color), w: Math.pow(e.v, CATEGORY_POWER) }));
-      const wsum = weighted.reduce((s, e) => s + e.w, 0) || 1;
-      const c = new THREE.Color(0, 0, 0);
-      for (const e of weighted) c.add(e.c.multiplyScalar(e.w / wsum));
-      return c;
+      const presence = Math.min(active.reduce((s, e) => s + e.v, 0), 1);
+      let pure = null;
+      if (active.length > 0) {
+        const weighted = active.map((e) => ({ c: new THREE.Color(ELEMENT_INFO[e.el].color), w: Math.pow(e.v, CATEGORY_POWER) }));
+        const wsum = weighted.reduce((s, e) => s + e.w, 0) || 1;
+        pure = new THREE.Color(0, 0, 0);
+        for (const e of weighted) pure.add(e.c.multiplyScalar(e.w / wsum));
+      }
+      return { pure, presence };
     }
 
-    let colorA = categoryColor(BACK_ELEMENTS);
-    let colorB = categoryColor(FRONT_ELEMENTS);
-    if (colorA && !colorB) {
-      // Nothing in the front category active: soft-belly highlight is just
-      // a lighter tint of the back color, same fallback idea as before.
-      colorB = colorA.clone().lerp(new THREE.Color(0xffffff), 0.4);
-    } else if (!colorA && colorB) {
-      // Nothing in the back category active: the back becomes a slightly
-      // darker/muted tint of the front color, so it doesn't fall back to a
-      // flat neutral body with only the belly colored.
-      colorA = colorB.clone().lerp(new THREE.Color(0x000000), 0.25);
-    } else if (!colorA && !colorB) {
-      colorA = neutral.clone();
-      colorB = neutral.clone();
-    }
+    const back = categoryBlend(BACK_ELEMENTS);
+    const front = categoryBlend(FRONT_ELEMENTS);
+    // Each side's "not there yet" identity is a tint of the OTHER side's
+    // pure hue (or neutral if that's empty too) — same fallback idea as
+    // before, but now it's the LERP START POINT rather than a hard swap:
+    // colorA/colorB ease from this fallback toward their own pure hue as
+    // their own category's presence rises from 0, instead of snapping.
+    const backFallback = front.pure ? front.pure.clone().lerp(new THREE.Color(0x000000), 0.25) : neutral.clone();
+    const frontFallback = back.pure ? back.pure.clone().lerp(new THREE.Color(0xffffff), 0.4) : neutral.clone();
+    const colorA = backFallback.clone().lerp(back.pure ?? backFallback, back.presence);
+    const colorB = frontFallback.clone().lerp(front.pure ?? frontFallback, front.presence);
     colorA.lerp(neutral, 1 - strength);
     colorB.lerp(neutral, 1 - strength);
 
