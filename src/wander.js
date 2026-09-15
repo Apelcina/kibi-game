@@ -37,6 +37,9 @@ export function createWander(rig, opts = {}) {
   let target = rig.position.clone();
   const toTarget = new THREE.Vector3();
 
+  // update(dt) returns true while actively walking (false while idling) so
+  // the caller can pass that through to kibi.update() — Kibi's own gait
+  // animation only plays while actually moving.
   function update(dt) {
     if (state === 'idle') {
       idleTimer -= dt;
@@ -44,7 +47,7 @@ export function createWander(rig, opts = {}) {
         target = randomTarget();
         state = 'walking';
       }
-      return;
+      return false;
     }
 
     toTarget.copy(target).sub(rig.position);
@@ -53,7 +56,7 @@ export function createWander(rig, opts = {}) {
     if (dist < ARRIVE_THRESHOLD) {
       state = 'idle';
       idleTimer = randomIdleDuration();
-      return;
+      return false;
     }
 
     const dir = toTarget.multiplyScalar(1 / dist); // normalize (dist > ARRIVE_THRESHOLD > 0)
@@ -68,6 +71,7 @@ export function createWander(rig, opts = {}) {
     yawDiff = Math.atan2(Math.sin(yawDiff), Math.cos(yawDiff)); // shortest turn direction
     const maxTurn = TURN_SPEED * dt;
     rig.rotation.y += Math.max(-maxTurn, Math.min(maxTurn, yawDiff));
+    return true;
   }
 
   return { update };

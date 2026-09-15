@@ -546,6 +546,15 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   const blinkState = { timer: randomBlinkDelay(), blinking: false, phase: 0 };
   let bulk = 1; // current ground "zoom" factor — computed in the ground block below,
                 // but referenced later (wings) too, so it's hoisted to function scope
+  // Accumulated (not wall-clock) phase for the solo rock — dt-integrated so
+  // switching its speed (idle vs walking, see update()) changes the RATE
+  // smoothly without a jump, unlike `t * speed` which would snap to a
+  // different absolute phase the instant the speed constant changes.
+  let rockPhaseAccum = 0;
+  const ROCK_IDLE_SPEED = 1.15;
+  const ROCK_WALK_SPEED = 4; // faster — per feedback, was the same rate whether
+                              // idling or actually traveling, which didn't read
+                              // as matching how fast Kibi was covering ground
 
   function applyTraits(traits) {
     // Two-color scheme, FIXED category membership rather than rank. Two
@@ -769,12 +778,15 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     wingMat.emissive.set(wingBaseEmissive).lerp(new THREE.Color(ELEMENT_INFO.fairy.accent), fairy);
   }
 
-  function update(dt, t) {
+  function update(dt, t, moving = false) {
     if (isSolo) {
       // Rocks side to side in place with a squash on each "landing" — this
       // was the cube's flop animation; the cube shape itself is shelved for
-      // now, but the motion reads well for the sphere too.
-      const rockPhase = t * 1.15;
+      // now, but the motion reads well for the sphere too. Speeds up while
+      // actually walking so the rock reads as matching Kibi's travel pace
+      // rather than the same rate whether idle or on the move.
+      rockPhaseAccum += dt * (moving ? ROCK_WALK_SPEED : ROCK_IDLE_SPEED);
+      const rockPhase = rockPhaseAccum;
       group.rotation.z = Math.sin(rockPhase) * 0.55;
       const landing = Math.pow(Math.abs(Math.sin(rockPhase)), 8);
       group.scale.y = 1 - landing * 0.14;
@@ -844,19 +856,33 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
 
     // age 2+: running-in-place gait — legs swing, opposite arm swings with
     // each leg (contralateral, like a real trot), body/head bounce twice
-    // per stride (once per footfall) layered on top of the idle bob.
+    // per stride (once per footfall) layered on top of the idle bob. Only
+    // plays while actually moving — it used to run continuously regardless,
+    // which read as perpetually trotting in place even while idle (per
+    // feedback: idle should read as generally still, with just the light
+    // bob/sway above). Eases back to a neutral rest pose when idle instead
+    // of snapping straight to it.
     if (legL) {
-      const runPhase = t * 6.5;
-      const legSwing = 0.55;
-      const armSwing = 0.4;
-      legL.rotation.x = Math.sin(runPhase) * legSwing;
-      legR.rotation.x = Math.sin(runPhase + Math.PI) * legSwing;
-      armL.rotation.x = Math.sin(runPhase + Math.PI) * armSwing;
-      armR.rotation.x = Math.sin(runPhase) * armSwing;
+      if (moving) {
+        const runPhase = t * 6.5;
+        const legSwing = 0.55;
+        const armSwing = 0.4;
+        legL.rotation.x = Math.sin(runPhase) * legSwing;
+        legR.rotation.x = Math.sin(runPhase + Math.PI) * legSwing;
+        armL.rotation.x = Math.sin(runPhase + Math.PI) * armSwing;
+        armR.rotation.x = Math.sin(runPhase) * armSwing;
 
-      const footfall = Math.abs(Math.sin(runPhase));
-      group.position.y += footfall * 0.02;
-      head.rotation.x = footfall * 0.05 - 0.02;
+        const footfall = Math.abs(Math.sin(runPhase));
+        group.position.y += footfall * 0.02;
+        head.rotation.x = footfall * 0.05 - 0.02;
+      } else {
+        const ease = Math.min(1, dt * 8);
+        legL.rotation.x *= 1 - ease;
+        legR.rotation.x *= 1 - ease;
+        armL.rotation.x *= 1 - ease;
+        armR.rotation.x *= 1 - ease;
+        head.rotation.x *= 1 - ease;
+      }
     }
   }
 

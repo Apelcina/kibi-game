@@ -289,8 +289,8 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   const t = clock.elapsedTime;
-  wander.update(dt);
-  kibi.update(dt, t);
+  const isWalking = wander.update(dt);
+  kibi.update(dt, t, isWalking);
   for (const orb of orbs) orb.update(dt, t);
 
   // Camera keeps Kibi in view as it wanders the island — follows smoothly
