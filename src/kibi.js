@@ -34,6 +34,8 @@ const HEAD_Y = 0.58; // overlaps the body for a chibi read, but leaves the body'
                       // sides/bottom clear so age-2 limbs have somewhere to attach
 const ARM_BASE_SCALE = [1, 0.8, 0.95];
 const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
+const ARM_PIVOT_BASE = [0.22, 0.27, 0.15];
+const LEG_PIVOT_BASE = [0.14, 0.06, 0.11];
 
 function lowPolyMaterial(color, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -240,10 +242,10 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       return { pivot, mesh };
     }
 
-    const armSideL = makeLimb(armGeo, [0.22, 0.27, 0.15], ARM_BASE_SCALE);
-    const armSideR = makeLimb(armGeo, [-0.22, 0.27, 0.15], ARM_BASE_SCALE);
-    const legSideL = makeLimb(legGeo, [0.14, 0.06, 0.11], LEG_BASE_SCALE);
-    const legSideR = makeLimb(legGeo, [-0.14, 0.06, 0.11], LEG_BASE_SCALE);
+    const armSideL = makeLimb(armGeo, ARM_PIVOT_BASE, ARM_BASE_SCALE);
+    const armSideR = makeLimb(armGeo, [-ARM_PIVOT_BASE[0], ARM_PIVOT_BASE[1], ARM_PIVOT_BASE[2]], ARM_BASE_SCALE);
+    const legSideL = makeLimb(legGeo, LEG_PIVOT_BASE, LEG_BASE_SCALE);
+    const legSideR = makeLimb(legGeo, [-LEG_PIVOT_BASE[0], LEG_PIVOT_BASE[1], LEG_PIVOT_BASE[2]], LEG_BASE_SCALE);
     armL = armSideL.pivot; armR = armSideR.pivot;
     armMeshL = armSideL.mesh; armMeshR = armSideR.mesh;
     legL = legSideL.pivot; legR = legSideR.pivot;
@@ -503,6 +505,22 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       const [sx, sy, sz] = LEG_BASE_SCALE;
       legMeshL.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
       legMeshR.scale.set(sx * (1 + water * 0.55) * bulkWide, sy * (1 - water * 0.4) * bulkTall, sz * (1 + water * 0.7) * bulkWide);
+    }
+    // Round-19 review found a real regression here: growing the head alone
+    // (it already overlaps the body deeply, by design, for the chibi look)
+    // swallowed the arm pivots at high ground values — the arms weren't
+    // detached, just geometrically buried under the now-larger head, so
+    // they read as completely missing from every angle. Limb MOUNT POINTS
+    // now move outward with ground too, faster than the body/head grow
+    // (0.4 vs 0.16/0.32), so the limbs stay clear as the whole creature
+    // gets bigger instead of the head expanding into where they used to be.
+    if (armL) {
+      const limbSpread = 1 + ground * 0.4;
+      const limbLift = 1 + ground * 0.3;
+      armL.position.set(ARM_PIVOT_BASE[0] * limbSpread, ARM_PIVOT_BASE[1] * limbLift, ARM_PIVOT_BASE[2] * limbSpread);
+      armR.position.set(-ARM_PIVOT_BASE[0] * limbSpread, ARM_PIVOT_BASE[1] * limbLift, ARM_PIVOT_BASE[2] * limbSpread);
+      legL.position.set(LEG_PIVOT_BASE[0] * limbSpread, LEG_PIVOT_BASE[1] * limbLift, LEG_PIVOT_BASE[2] * limbSpread);
+      legR.position.set(-LEG_PIVOT_BASE[0] * limbSpread, LEG_PIVOT_BASE[1] * limbLift, LEG_PIVOT_BASE[2] * limbSpread);
     }
 
     // nature -> dark thorn spikes grow in along the spine (and arms, age 2+).
