@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createKibi } from './kibi.js';
+import { createCollectionOrb } from './collectionOrb.js';
 import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits, MAJOR_ELEMENTS, MINOR_ELEMENTS, MISC_ELEMENTS } from './traits.js';
 import './style.css';
 
@@ -63,6 +64,24 @@ function rebuildKibi() {
   scene.add(kibi.group);
 }
 rebuildKibi();
+
+// --- collection orbs (preview only — no inventory system yet) --------------
+// One "seed" orb per element that actually feeds a trait, arranged in a
+// ring around Kibi so the whole set can be reviewed together. fairy is
+// left out: it isn't part of the color scheme (see MISC_ELEMENTS) and
+// doesn't have a "seed" of its own yet.
+const orbElements = [...MAJOR_ELEMENTS, ...MINOR_ELEMENTS];
+const orbs = orbElements.map((el, i) => {
+  const orb = createCollectionOrb(el);
+  const angle = (i / orbElements.length) * Math.PI * 2;
+  const r = 1.7;
+  orb.group.position.set(Math.cos(angle) * r, 0.26, Math.sin(angle) * r);
+  orb.group.traverse((obj) => {
+    if (obj.isMesh) obj.castShadow = true;
+  });
+  scene.add(orb.group);
+  return orb;
+});
 
 // Dev-only hook: reliable state setter for scripted screenshot/testing tools,
 // since driving <input type="range">/radio elements from outside the page is
@@ -231,6 +250,7 @@ renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   const t = clock.elapsedTime;
   kibi.update(dt, t);
+  for (const orb of orbs) orb.update(dt, t);
   controls.update();
   renderer.render(scene, camera);
 });
