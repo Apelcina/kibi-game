@@ -54,6 +54,12 @@ const ARM_BASE_SCALE = [0.9, 1.2, 0.8];
 const LEG_BASE_SCALE = [0.82, 0.68, 1.25];
 const ARM_PIVOT_BASE = [0.22, 0.27, 0.06];
 const ARM_RADIUS = 0.12; // must match armGeo's IcosahedronGeometry radius below
+// How far below its shoulder pivot the arm mesh hangs (see makeLimb's
+// meshOffset) — a named constant, not just inlined where the mesh is built,
+// because the arm-mounted nature thorns need this SAME value to place
+// themselves on the arm's actual (offset) surface instead of where the arm
+// used to be centered (the pivot origin).
+const ARM_HANG_OFFSET_Y = -ARM_RADIUS * ARM_BASE_SCALE[1] * 0.55;
 const LEG_RADIUS = 0.13; // must match legGeo's IcosahedronGeometry radius below
 // Leg pivot Y solved so the leg's BOTTOM edge sits exactly at y=0 (ground
 // level) given the mesh is centered on its pivot with no Y offset — the
@@ -354,7 +360,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       return { pivot, mesh };
     }
 
-    const armMeshOffset = [0, -ARM_RADIUS * ARM_BASE_SCALE[1] * 0.55, 0];
+    const armMeshOffset = [0, ARM_HANG_OFFSET_Y, 0];
     const legForwardOffset = LEG_RADIUS * (LEG_BASE_SCALE[2] - 1.05);
     const legMeshOffset = [0, 0, 0.02 + legForwardOffset];
 
@@ -550,7 +556,16 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   // body's center, matching the outward side of each mirrored arm) as well
   // as back, which clears the torso.
   if (age >= 2) {
-    const armRadius = 0.12;
+    // Per-axis radii (not a single uniform armRadius) since the arm mesh is
+    // an anisotropically-scaled ellipsoid (ARM_BASE_SCALE), not a sphere —
+    // and offset by ARM_HANG_OFFSET_Y to match the arm mesh's own position,
+    // which no longer sits at the pivot's origin (it hangs below it, see
+    // makeLimb). Without both of these, thorns are placed as if the arm
+    // were still the old sphere-at-the-pivot shape, so they end up floating
+    // off of where the arm actually is (found in review after the arms were
+    // reshaped to hang at Kibi's sides).
+    const armRadii = [ARM_RADIUS * ARM_BASE_SCALE[0], ARM_RADIUS * ARM_BASE_SCALE[1], ARM_RADIUS * ARM_BASE_SCALE[2]];
+    const ARM_THORN_MARGIN = 1.15; // sit slightly outside the arm's own surface
     const armThornSpecs = [
       { dir: new THREE.Vector3(0.75, 0.15, -0.6), s: 1 },
       { dir: new THREE.Vector3(0.65, -0.25, -0.65), s: 0.8 },
@@ -558,12 +573,21 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     for (const { dir, s } of armThornSpecs) {
       const d = dir.clone().normalize();
       const quat = new THREE.Quaternion().setFromUnitVectors(upAxis, d);
-      const posL = [d.x * armRadius * 1.15, d.y * armRadius * 1.15, d.z * armRadius * 1.15];
-      makeThorn(armL, posL, quat, s, 'arm');
+      // `surface` is the part that scales with the arm mesh's own size
+      // (ground's bulk, see applyTraits below) — ARM_HANG_OFFSET_Y is a
+      // fixed position offset that does NOT grow with bulk (the arm mesh's
+      // own local offset never changes, only its scale does), so it's kept
+      // out of userData.basePos and re-added after scaling instead of being
+      // baked into the same value.
+      const surfaceL = [d.x * armRadii[0] * ARM_THORN_MARGIN, d.y * armRadii[1] * ARM_THORN_MARGIN, d.z * armRadii[2] * ARM_THORN_MARGIN];
+      const thornL = makeThorn(armL, [surfaceL[0], ARM_HANG_OFFSET_Y + surfaceL[1], surfaceL[2]], quat, s, 'arm');
+      thornL.userData.basePos = surfaceL;
       const dMirrored = new THREE.Vector3(-d.x, d.y, d.z);
       const quatR = new THREE.Quaternion().setFromUnitVectors(upAxis, dMirrored);
-      const posR = [dMirrored.x * armRadius * 1.15, dMirrored.y * armRadius * 1.15, dMirrored.z * armRadius * 1.15];
-      makeThorn(armR, posR, quatR, s, 'arm');
+      const surfaceR = [dMirrored.x * armRadii[0] * ARM_THORN_MARGIN, dMirrored.y * armRadii[1] * ARM_THORN_MARGIN, dMirrored.z * armRadii[2] * ARM_THORN_MARGIN];
+      const posR = [surfaceR[0], ARM_HANG_OFFSET_Y + surfaceR[1], surfaceR[2]];
+      const thornR = makeThorn(armR, posR, quatR, s, 'arm');
+      thornR.userData.basePos = surfaceR;
     }
   }
 
@@ -770,15 +794,16 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     // center, so they get the same center+offset*bulk treatment (using the
     // live body.position.y as the center, torsoCenterY — frozen, ==
     // bodyBaseY — only for the offset). Arm thorns live in the arm PIVOT's
-    // local space, where the pivot's own origin already IS the center (the
-    // pivot itself now carries bodyLift), so their local position just
-    // scales by bulk directly.
+    // local space; basePos for these is the arm-surface offset ONLY (see
+    // where they're built above) with ARM_HANG_OFFSET_Y — the arm mesh's
+    // own fixed hang-down offset, which doesn't grow with bulk — re-added
+    // after scaling rather than baked into basePos itself.
     for (const th of thorns) {
       const [px, py, pz] = th.userData.basePos;
       if (th.userData.kind === 'spine') {
         th.position.set(px * bulk, body.position.y + (py - torsoCenterY) * bulk, pz * bulk);
       } else {
-        th.position.set(px * bulk, py * bulk, pz * bulk);
+        th.position.set(px * bulk, ARM_HANG_OFFSET_Y + py * bulk, pz * bulk);
       }
     }
 
