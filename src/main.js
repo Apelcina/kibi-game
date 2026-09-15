@@ -4,6 +4,7 @@ import { createKibi } from './kibi.js';
 import { createCollectionOrb } from './collectionOrb.js';
 import { createSatoshiOrb } from './satoshiOrb.js';
 import { createTerrain } from './terrain.js';
+import { createWander } from './wander.js';
 import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits, MAJOR_ELEMENTS, MINOR_ELEMENTS, MISC_ELEMENTS } from './traits.js';
 import './style.css';
 
@@ -56,13 +57,22 @@ const terrain = createTerrain();
 scene.add(terrain.group);
 
 // --- kibi (rebuilt whenever age/shape change; traits persist across that) ---
+// `kibiRig` is the OUTER group that actually moves/turns around the home
+// scene (see wander.js) — kept separate from `kibi.group` (the INNER group
+// kibi.js's own update() animates: idle bob/sway/rock) so wandering and
+// Kibi's own idle animation compose naturally instead of fighting over the
+// same transform. rebuildKibi() only ever touches the inner group; the rig
+// itself, and its current position/facing, survive an age/shape change.
+const kibiRig = new THREE.Group();
+scene.add(kibiRig);
+
 const traits = createDefaultTraits();
 const structure = { age: 1, shape: 'sphere' };
 let kibi = null;
 
 function rebuildKibi() {
   if (kibi) {
-    scene.remove(kibi.group);
+    kibiRig.remove(kibi.group);
     kibi.dispose();
   }
   kibi = createKibi(structure);
@@ -70,9 +80,11 @@ function rebuildKibi() {
     if (obj.isMesh) obj.castShadow = true;
   });
   kibi.applyTraits(traits);
-  scene.add(kibi.group);
+  kibiRig.add(kibi.group);
 }
 rebuildKibi();
+
+const wander = createWander(kibiRig);
 
 // --- collection orbs (preview only — no inventory system yet) --------------
 // One "seed" orb per element that actually feeds a trait, arranged as
@@ -272,12 +284,21 @@ window.addEventListener('resize', () => {
 });
 
 // --- loop ------------------------------------------------------------------
+const cameraTarget = new THREE.Vector3();
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   const t = clock.elapsedTime;
+  wander.update(dt);
   kibi.update(dt, t);
   for (const orb of orbs) orb.update(dt, t);
+
+  // Camera keeps Kibi in view as it wanders the island — follows smoothly
+  // rather than snapping, so the user can still freely orbit/zoom around
+  // wherever Kibi currently is.
+  cameraTarget.set(kibiRig.position.x, 0.6, kibiRig.position.z);
+  controls.target.lerp(cameraTarget, Math.min(1, dt * 2));
+
   controls.update();
   renderer.render(scene, camera);
 });
