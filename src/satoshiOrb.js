@@ -1,14 +1,13 @@
 import * as THREE from 'three';
 
 // A one-off "satoshi" collectible, alongside the per-element orbs in
-// collectionOrb.js — same two-nested-spheres shell/breathing-glow idea, but
+// collectionOrb.js — same semi-transparent shell/breathing-glow idea, but
 // smaller, Bitcoin-orange/gold instead of an element color, and with a
 // floating low-poly "sats" glyph (three horizontal bars + two short angled
-// strokes crossing the top and bottom bars) in place of the seedling
-// sprout, since this one isn't an element seed.
+// strokes crossing the top and bottom bars) inside — no solid inner core
+// ball (removed per feedback), just the shell and the glyph floating in it.
 
 const OUTER_RADIUS = 0.14;
-const INNER_RADIUS = 0.06;
 
 const BASE_COLOR = 0xf7931a; // Bitcoin orange
 const ACCENT_COLOR = 0xffe6a8; // pale gold, for the glyph
@@ -68,22 +67,10 @@ export function createSatoshiOrb() {
   const outer = new THREE.Mesh(outerGeo, outerMat);
   group.add(outer);
 
-  // --- inner core: small solid gold ball ----------------------------------
-  const innerMat = track(new THREE.MeshStandardMaterial({
-    color: baseColor,
-    flatShading: true,
-    roughness: 0.4,
-    metalness: 0.3,
-    emissive: baseColor,
-    emissiveIntensity: 0.25,
-  }));
-  const inner = new THREE.Mesh(track(lowPolySphere(INNER_RADIUS, 1)), innerMat);
-  group.add(inner);
-
   // --- floating sats glyph: 3 horizontal bars + 2 short angled strokes ---
   // crossing the top and bottom bars (not the middle one) — a low-poly
   // stand-in for the community-proposed "sats" symbol, not attached to the
-  // inner core, so it can drift/spin on its own and read as "floating."
+  // it can drift/spin on its own and read as "floating."
   const glyph = new THREE.Group();
   const glyphMat = track(new THREE.MeshStandardMaterial({
     color: accentColor,
@@ -124,10 +111,8 @@ export function createSatoshiOrb() {
   const GLYPH_BOB_RANGE = 0.012;
 
   function update(dt, t) {
-    inner.rotation.y += dt * 0.3;
     group.rotation.y += dt * 0.18;
-    // Glyph floats independently of the inner core: its own slow spin plus
-    // a gentle vertical bob.
+    // Glyph floats on its own: a slow spin plus a gentle vertical bob.
     glyph.rotation.y += dt * 0.6;
     glyph.position.y = Math.sin(t * 0.9) * GLYPH_BOB_RANGE;
 
