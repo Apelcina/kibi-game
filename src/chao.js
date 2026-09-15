@@ -249,17 +249,11 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
   const flameGroup = new THREE.Group();
   const flameBaseY = headTopY + 0.14;
   flameGroup.position.set(0, flameBaseY, 0);
-  const orbMat = track(new THREE.MeshStandardMaterial({
-    color: ELEMENT_INFO.fire.accent,
-    emissive: ELEMENT_INFO.fire.color,
-    emissiveIntensity: 0.8,
-    flatShading: true,
-    transparent: true,
-    opacity: 0,
-    roughness: 0.35,
-  }));
-  const orb = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.075, 1)), orbMat);
-  flameGroup.add(orb);
+  // Orb shares flameOuterMat's exact color scheme (not its own accent-based
+  // one) so the orb and the cone's base read as one continuous flame body,
+  // with only the inner cone standing out as the bright tip — and the orb
+  // now pulses in update() the same way the cones already did, instead of
+  // sitting static while everything around it flickers.
   const flameOuterMat = track(new THREE.MeshStandardMaterial({
     color: ELEMENT_INFO.fire.color,
     emissive: ELEMENT_INFO.fire.color,
@@ -276,10 +270,12 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     transparent: true,
     opacity: 0,
   }));
-  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.065, 0.2, 6)), flameOuterMat);
-  flameOuter.position.y = 0.1;
-  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.038, 0.12, 6)), flameInnerMat);
-  flameInner.position.y = 0.14;
+  const orb = new THREE.Mesh(track(new THREE.IcosahedronGeometry(0.088, 1)), flameOuterMat);
+  flameGroup.add(orb);
+  const flameOuter = new THREE.Mesh(track(new THREE.ConeGeometry(0.06, 0.17, 6)), flameOuterMat);
+  flameOuter.position.y = 0.095;
+  const flameInner = new THREE.Mesh(track(new THREE.ConeGeometry(0.035, 0.1, 6)), flameInnerMat);
+  flameInner.position.y = 0.125;
   flameGroup.add(flameOuter, flameInner);
   flameGroup.scale.setScalar(0.01);
   group.add(flameGroup);
@@ -318,41 +314,53 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     opacity: 0,
     roughness: 0.6,
   }));
-  // Round-15 review: at normal viewing distance the old size (0.032/0.1)
-  // read as facet-shading noise, not distinct spikes — needed a real size
-  // increase, not just correct placement.
-  const thornGeo = track(new THREE.ConeGeometry(0.055, 0.18, 5));
+  // Round-16 feedback: the spine row read as a straight line floating off
+  // the body (not attached) and clipped through the tail. Fatter/shorter
+  // now (a hedgehog quill, not a needle), and placed as an actual patch
+  // covering the upper-to-mid back — positions computed as points ON the
+  // torso's own sphere surface (center + direction*radius), each rotated
+  // via quaternion to point straight out along that same direction, so
+  // every thorn actually roots into the body instead of floating at a
+  // fixed depth regardless of the surface's curve. Directions stay clear
+  // of the tail's mount zone (x≈0, y below center).
+  const thornGeo = track(new THREE.ConeGeometry(0.07, 0.13, 5));
   const thorns = [];
-  function makeThorn(parent, pos, rot, scale) {
+  function makeThorn(parent, pos, quat, scale) {
     const t = new THREE.Mesh(thornGeo, thornMat);
     t.position.set(...pos);
-    t.rotation.set(...rot);
+    if (quat) t.quaternion.copy(quat);
     t.userData.baseScale = scale;
     parent.add(t);
     thorns.push(t);
     return t;
   }
-  // Spine: a small row of thorns up the back, each tilting a little further
-  // back than the last for a stegosaurus-plate rhythm.
+
+  const torsoCenterY = body.position.y;
+  const torsoRadius = isSolo ? SOLO_RADIUS : BODY_RADIUS;
+  const upAxis = new THREE.Vector3(0, 1, 0);
   const spineSpecs = [
-    { y: backY - 0.1, s: 0.8, tilt: -0.1 },
-    { y: backY + 0.06, s: 1.05, tilt: -0.3 },
-    { y: backY + 0.22, s: 0.9, tilt: -0.5 },
+    { dir: new THREE.Vector3(0, 0.6, -0.7), s: 1 },
+    { dir: new THREE.Vector3(0.32, 0.42, -0.78), s: 0.9 },
+    { dir: new THREE.Vector3(-0.32, 0.42, -0.78), s: 0.9 },
+    { dir: new THREE.Vector3(0.4, 0.12, -0.85), s: 0.85 },
+    { dir: new THREE.Vector3(-0.4, 0.12, -0.85), s: 0.85 },
+    { dir: new THREE.Vector3(0.22, -0.15, -0.9), s: 0.8 },
+    { dir: new THREE.Vector3(-0.22, -0.15, -0.9), s: 0.8 },
   ];
-  // Pushed further back than the body's own surface (backZ * 1.25, not
-  // backZ) so the thorns clear the silhouette edge and read against open
-  // background instead of blending into the body's own curve.
   for (const spec of spineSpecs) {
-    makeThorn(group, [0, spec.y, backZ * 1.25], [spec.tilt, 0, 0], spec.s);
+    const d = spec.dir.clone().normalize();
+    const embedDepth = torsoRadius * 0.9; // slightly inside the surface so it reads as rooted, not resting on top
+    const pos = [d.x * embedDepth, torsoCenterY + d.y * embedDepth, d.z * embedDepth];
+    const quat = new THREE.Quaternion().setFromUnitVectors(upAxis, d);
+    makeThorn(group, pos, quat, spec.s);
   }
   // Arms (age 2+ only): two thorns on the back of each arm, in the pivot so
-  // they inherit the running-gait swing. Pushed further from the arm's own
-  // ~0.12 radius for the same reason.
+  // they inherit the running-gait swing.
   if (age >= 2) {
-    for (const pivot of [armL, armR]) {
-      makeThorn(pivot, [0, 0.03, -0.15], [-Math.PI * 0.42, 0, 0], 0.95);
-      makeThorn(pivot, [0, -0.06, -0.14], [-Math.PI * 0.3, 0, 0], 0.8);
-    }
+    makeThorn(armL, [0, 0.03, -0.15], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, 0.3, -0.95).normalize()), 0.95);
+    makeThorn(armL, [0, -0.06, -0.14], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, -0.2, -0.98).normalize()), 0.8);
+    makeThorn(armR, [0, 0.03, -0.15], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, 0.3, -0.95).normalize()), 0.95);
+    makeThorn(armR, [0, -0.06, -0.14], new THREE.Quaternion().setFromUnitVectors(upAxis, new THREE.Vector3(0, -0.2, -0.98).normalize()), 0.8);
   }
 
   const skinMeshes = [body, head, tail, ...limbs, wingL, wingR];
@@ -413,8 +421,7 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     // fire -> floating flame orb grows in, centered above the head, AND
     // small horns pull out of the head's own vertices near the temples.
     const fireT = Math.min(fire * 1.2, 1);
-    orbMat.opacity = fireT;
-    flameOuterMat.opacity = fireT;
+    flameOuterMat.opacity = fireT; // orb shares this material, so it's covered too
     flameInnerMat.opacity = fireT;
     flameGroup.scale.setScalar(0.01 + fire * 1.1);
 
@@ -496,6 +503,11 @@ export function createChao({ age = 1, shape = 'sphere' } = {}) {
     if (flameOuterMat.opacity > 0.01) {
       const flicker = 1 + Math.sin(t * 9) * 0.08;
       flameOuter.scale.set(flicker, 1 + Math.sin(t * 7) * 0.12, flicker);
+      // orb shares flameOuterMat, so its glow already pulses with the cone's
+      // emissiveIntensity below — it just needs its own gentle scale pulse
+      // (a different phase so it doesn't move in lockstep with the cone).
+      const orbPulse = 1 + Math.sin(t * 5.5) * 0.06;
+      orb.scale.setScalar(orbPulse);
       flameOuterMat.emissiveIntensity = 1 + Math.sin(t * 9) * 0.25;
       flameInnerMat.emissiveIntensity = 1.3 + Math.sin(t * 11) * 0.3;
       flameGroup.position.y = flameBaseY + Math.sin(t * 2.2) * 0.025;
