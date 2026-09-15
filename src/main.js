@@ -289,8 +289,14 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   const t = clock.elapsedTime;
-  const isWalking = wander.update(dt);
-  kibi.update(dt, t, isWalking);
+  // kibi.update() runs first so it can compute this frame's speedMultiplier
+  // (from its own gait phase) in time for wander.update() to actually use
+  // it — `wander.isMoving()` reflects last frame's state, one frame stale
+  // at a walking<->idle transition, which is imperceptible. This is what
+  // keeps forward movement paced to each stride instead of gliding at a
+  // constant speed independent of the leg animation.
+  const speedMultiplier = kibi.update(dt, t, wander.isMoving());
+  wander.update(dt, speedMultiplier);
   for (const orb of orbs) orb.update(dt, t);
 
   // Camera keeps Kibi in view as it wanders the island — follows smoothly

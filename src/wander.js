@@ -37,10 +37,22 @@ export function createWander(rig, opts = {}) {
   let target = rig.position.clone();
   const toTarget = new THREE.Vector3();
 
-  // update(dt) returns true while actively walking (false while idling) so
-  // the caller can pass that through to kibi.update() — Kibi's own gait
-  // animation only plays while actually moving.
-  function update(dt) {
+  // isMoving() reflects the state as of the end of the LAST update() call —
+  // callers (main.js) read it BEFORE this frame's update() so kibi.js can
+  // decide its gait animation and hand back a speedMultiplier in time for
+  // THIS frame's update() to actually use it (see speedMultiplier below).
+  // One frame stale at a walking<->idle transition, which is imperceptible.
+  function isMoving() {
+    return state === 'walking';
+  }
+
+  // speedMultiplier (from kibi.update()'s return value) scales this frame's
+  // translation — per feedback, a constant glide while the legs cycle at
+  // their own pace read as gliding/skating rather than walking. kibi.js
+  // computes it from the SAME phase driving the leg swing, so movement
+  // speeds up and slows down in lockstep with each stride instead of two
+  // independently-paced animations.
+  function update(dt, speedMultiplier = 1) {
     if (state === 'idle') {
       idleTimer -= dt;
       if (idleTimer <= 0) {
@@ -60,7 +72,7 @@ export function createWander(rig, opts = {}) {
     }
 
     const dir = toTarget.multiplyScalar(1 / dist); // normalize (dist > ARRIVE_THRESHOLD > 0)
-    const step = Math.min(speed * dt, dist);
+    const step = Math.min(speed * speedMultiplier * dt, dist);
     rig.position.addScaledVector(dir, step);
 
     // Turn to face the walking direction — Kibi's own local +Z is "front"
@@ -74,5 +86,5 @@ export function createWander(rig, opts = {}) {
     return true;
   }
 
-  return { update };
+  return { update, isMoving };
 }

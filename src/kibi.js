@@ -821,6 +821,13 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   }
 
   function update(dt, t, moving = false) {
+    // Returned to the caller (main.js passes it to wander.js) so forward
+    // translation can be scaled by the SAME phase driving the leg swing —
+    // per feedback, a constant glide while the legs cycled independently
+    // read as skating rather than walking. Stays 1 (no change to whatever
+    // speed wander.js was already using) except during the legged gait
+    // below, which computes its own pulsing value from its own phase.
+    let speedMultiplier = 1;
     if (isSolo) {
       // Rocks side to side in place with a squash on each "landing" — this
       // was the cube's flop animation; the cube shape itself is shelved for
@@ -922,6 +929,15 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
         const footfall = Math.abs(Math.sin(runPhase));
         group.position.y += footfall * 0.02;
         head.rotation.x = footfall * 0.05 - 0.02;
+
+        // Forward speed pulses in sync with the stride — two peaks per
+        // full leg cycle (once per footfall, matching `footfall` above)
+        // instead of a flat 1. Averages to exactly 1 over a full cycle
+        // (cos's own average is 0), so overall travel speed/ETA still
+        // matches whatever pace wander.js configured — this only changes
+        // the RHYTHM of the motion, not the average speed.
+        const STEP_AMPLITUDE = 0.6;
+        speedMultiplier = 1 - STEP_AMPLITUDE * Math.cos(2 * runPhase);
       } else {
         const ease = Math.min(1, dt * 8);
         legL.rotation.x *= 1 - ease;
@@ -931,6 +947,7 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
         head.rotation.x *= 1 - ease;
       }
     }
+    return speedMultiplier;
   }
 
   function dispose() {
