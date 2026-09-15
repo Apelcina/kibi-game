@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createKibi } from './kibi.js';
 import { createCollectionOrb } from './collectionOrb.js';
 import { createSatoshiOrb } from './satoshiOrb.js';
+import { createTerrain } from './terrain.js';
 import { ELEMENTS, ELEMENT_INFO, AGES, BODY_SHAPES, createDefaultTraits, MAJOR_ELEMENTS, MINOR_ELEMENTS, MISC_ELEMENTS } from './traits.js';
 import './style.css';
 
@@ -18,16 +19,19 @@ sceneRoot.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbfe6ff);
-scene.fog = new THREE.Fog(0xbfe6ff, 6, 16);
+// Pushed way out from the old (6, 16) — that was tuned for a 2.2-radius
+// platform; the home scene's island alone runs out to radius 48, so fog
+// needs to stay clear of it and only fade in over the open water beyond.
+scene.fog = new THREE.Fog(0xbfe6ff, 30, 220);
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(1.6, 1.4, 2.4);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+camera.position.set(5, 4, 7);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.6, 0);
 controls.enableDamping = true;
 controls.minDistance = 1.2;
-controls.maxDistance = 6;
+controls.maxDistance = 90; // was 6 — far enough to pull back and see the whole island
 controls.maxPolarAngle = Math.PI * 0.49;
 controls.update();
 
@@ -37,15 +41,19 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(3, 5, 2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
+// Default shadow-camera frustum is only ~±5 units — far too tight for the
+// home scene (orbs/props now spread out to radius ~40), so widen it to
+// cover the green+sand area. The water beyond doesn't need shadows.
+sun.shadow.camera.left = -45;
+sun.shadow.camera.right = 45;
+sun.shadow.camera.top = 45;
+sun.shadow.camera.bottom = -45;
+sun.shadow.camera.far = 60;
 scene.add(sun);
 
-// --- ground platform (low-poly garden patch) --------------------------------
-const groundGeo = new THREE.CylinderGeometry(2.2, 2.2, 0.2, 24, 1);
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x7fc96b, flatShading: true, roughness: 0.9 });
-const groundMesh = new THREE.Mesh(groundGeo, groundMat);
-groundMesh.position.y = -0.1;
-groundMesh.receiveShadow = true;
-scene.add(groundMesh);
+// --- home scene terrain (island: green -> sand -> beach -> water) ----------
+const terrain = createTerrain();
+scene.add(terrain.group);
 
 // --- kibi (rebuilt whenever age/shape change; traits persist across that) ---
 const traits = createDefaultTraits();
@@ -67,16 +75,19 @@ function rebuildKibi() {
 rebuildKibi();
 
 // --- collection orbs (preview only — no inventory system yet) --------------
-// One "seed" orb per element that actually feeds a trait, arranged in a
-// ring around Kibi so the whole set can be reviewed together. fairy is
-// left out: it isn't part of the color scheme (see MISC_ELEMENTS) and
-// doesn't have a "seed" of its own yet.
+// One "seed" orb per element that actually feeds a trait, arranged as
+// points of interest spread around the green area (radius 18, comfortably
+// inside the 30-radius green zone) so exploring the home scene actually
+// means walking out to find them, rather than everything huddled right on
+// top of Kibi. fairy is left out: it isn't part of the color scheme (see
+// MISC_ELEMENTS) and doesn't have a "seed" of its own yet.
+const ORB_RING_RADIUS = 18;
 const orbElements = [...MAJOR_ELEMENTS, ...MINOR_ELEMENTS];
 const ORB_SLOTS = orbElements.length + 1; // +1 for the satoshi orb below, so all orbs share one evenly-spaced ring
 const orbs = orbElements.map((el, i) => {
   const orb = createCollectionOrb(el);
   const angle = (i / ORB_SLOTS) * Math.PI * 2;
-  const r = 1.7;
+  const r = ORB_RING_RADIUS;
   orb.group.position.set(Math.cos(angle) * r, 0.26, Math.sin(angle) * r);
   orb.group.traverse((obj) => {
     if (obj.isMesh) obj.castShadow = true;
@@ -90,7 +101,7 @@ const orbs = orbElements.map((el, i) => {
 const satoshiOrb = createSatoshiOrb();
 {
   const angle = (orbElements.length / ORB_SLOTS) * Math.PI * 2;
-  const r = 1.7;
+  const r = ORB_RING_RADIUS;
   satoshiOrb.group.position.set(Math.cos(angle) * r, 0.18, Math.sin(angle) * r);
   satoshiOrb.group.traverse((obj) => {
     if (obj.isMesh) obj.castShadow = true;
