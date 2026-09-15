@@ -33,19 +33,27 @@ const HEAD_RADIUS = 0.38;
 const BODY_Y = BODY_RADIUS * 0.85; // body center height; squash keeps its base near the ground
 const HEAD_Y = 0.58; // overlaps the body for a chibi read, but leaves the body's
                       // sides/bottom clear so age-2 limbs have somewhere to attach
-// Z (3rd component) is the forward/back axis — bumped up from the original
-// 0.95/1.05 so arms/legs reach further (per feedback: "too stubby, he
-// couldn't reach anything"). The matching mesh.position.z offset applied in
-// makeLimb() below keeps the BACK edge where it was and puts all of that
-// added length on the front, so it reads as reaching forward rather than
-// just growing symmetrically in place.
-const ARM_BASE_SCALE = [1, 0.8, 1.15];
+// Arms: Y (2nd component) is the long axis now, not Z — per feedback, arms
+// reaching forward read wrong; they hang DOWN at Kibi's sides instead (see
+// armMeshOffset below, which shifts the mesh down from the shoulder pivot
+// so it hangs from it rather than being centered on it). ARM_PIVOT_BASE's
+// z also pulled back toward the body's side (was 0.15) to match.
+// Legs: z (3rd component, forward/back) is still bumped up from the
+// original 1.05 so legs reach further (per earlier feedback: "too stubby,
+// he couldn't reach anything") — walking legs are supposed to swing
+// forward/back, unlike arms. The matching mesh.position.z offset applied
+// in makeLimb() below keeps the BACK edge where it was and puts all of
+// that added length on the front.
+const ARM_BASE_SCALE = [0.9, 1.2, 0.8];
 const LEG_BASE_SCALE = [0.82, 0.68, 1.25];
-const ARM_PIVOT_BASE = [0.22, 0.27, 0.15];
-const LEG_PIVOT_BASE = [0.14, 0.06, 0.11];
+const ARM_PIVOT_BASE = [0.22, 0.27, 0.06];
 const ARM_RADIUS = 0.12; // must match armGeo's IcosahedronGeometry radius below
-const LEG_RADIUS = 0.13; // must match legGeo's IcosahedronGeometry radius below —
-                          // used to solve for the leg pivot Y that keeps feet planted
+const LEG_RADIUS = 0.13; // must match legGeo's IcosahedronGeometry radius below
+// Leg pivot Y solved so the leg's BOTTOM edge sits exactly at y=0 (ground
+// level) given the mesh is centered on its pivot with no Y offset — the
+// previous hand-picked 0.06 left the leg bottom ~0.03 below y=0 (visibly
+// clipping into the ground, worse once legs got longer).
+const LEG_PIVOT_BASE = [0.14, LEG_RADIUS * LEG_BASE_SCALE[1], 0.11];
 
 function lowPolyMaterial(color, opts = {}) {
   return new THREE.MeshStandardMaterial({
@@ -313,16 +321,21 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
     const legGeo = track(new THREE.IcosahedronGeometry(LEG_RADIUS, 2));
 
     // meshOffset shifts the mesh WITHIN its pivot's local space — the pivot
-    // itself (the swing/rotation center) never moves. Two things use this:
-    //  - forward reach: since ARM/LEG_BASE_SCALE's z got bigger, offsetting
+    // itself (the swing/rotation center) never moves. Used for:
+    //  - arms hanging by the side: the mesh is shifted DOWN from the
+    //    shoulder pivot so the arm hangs from it (like a real shoulder
+    //    joint) instead of being centered on it (which made half the arm
+    //    stick out ABOVE the shoulder).
+    //  - leg forward reach: since LEG_BASE_SCALE's z got bigger, offsetting
     //    the mesh forward by the added half-length keeps the BACK edge
     //    where it was and puts the growth entirely on the front.
-    //  - leg ankle fix (per feedback): the leg pivot used to sit at the
-    //    mesh's own geometric center, so swinging it just tumbled the whole
-    //    blob in place around its middle rather than hinging like a real
-    //    joint. Shifting the leg mesh down-and-forward moves the EFFECTIVE
-    //    pivot to the back-top of the leg blob (an "ankle" the leg hangs
-    //    from) instead of dead center.
+    //  - leg pivot, nudged toward the back (per feedback on the swing
+    //    animation pivoting around dead center): a small extra +z pushes
+    //    the effective pivot slightly behind the leg's own center.
+    // Note: unlike the ground-scaling anchor fixes elsewhere in this file,
+    // these offsets are NOT re-anchored against `bulk` each applyTraits()
+    // call — they're small enough that the drift at high ground values is
+    // negligible, so a one-time offset at construction is enough here.
     function makeLimb(geo, pivotPos, scale, meshOffset = [0, 0, 0]) {
       const pivot = new THREE.Group();
       pivot.position.set(...pivotPos);
@@ -335,10 +348,9 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       return { pivot, mesh };
     }
 
-    const armForwardOffset = ARM_RADIUS * (ARM_BASE_SCALE[2] - 0.95);
-    const armMeshOffset = [0, 0, armForwardOffset];
+    const armMeshOffset = [0, -ARM_RADIUS * ARM_BASE_SCALE[1] * 0.55, 0];
     const legForwardOffset = LEG_RADIUS * (LEG_BASE_SCALE[2] - 1.05);
-    const legMeshOffset = [0, -0.035, 0.02 + legForwardOffset];
+    const legMeshOffset = [0, 0, 0.02 + legForwardOffset];
 
     const armSideL = makeLimb(armGeo, ARM_PIVOT_BASE, ARM_BASE_SCALE, armMeshOffset);
     const armSideR = makeLimb(armGeo, [-ARM_PIVOT_BASE[0], ARM_PIVOT_BASE[1], ARM_PIVOT_BASE[2]], ARM_BASE_SCALE, armMeshOffset);
