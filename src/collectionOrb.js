@@ -135,26 +135,37 @@ export function createCollectionOrb(element) {
   makeLeaf(-1);
   makeLeaf(1);
 
-  const scanPhase = Math.random() * Math.PI * 2; // stagger multiple orbs so their scans don't sync up
+  const SCAN_CYCLE = 3; // seconds per bottom->top pass, incl. the appear/disappear fades
+  const scanPhase = Math.random() * SCAN_CYCLE; // stagger multiple orbs so their scans don't sync up
   const SCAN_RANGE = OUTER_RADIUS * 0.95; // stay just inside the poles along scanAxis
   const SCAN_SIGMA = OUTER_RADIUS * 0.09; // glow band width — thin, per feedback
   const SCAN_SHARPNESS = 1.8; // >1 steepens the falloff beyond the raw gaussian, so the
                                // edge reads as a crisp line rather than a soft, wide glow
+  const SCAN_FADE_FRAC = 0.12; // fraction of the cycle spent fading in / fading out
   const c = new THREE.Color();
+
+  function smooth01(x) {
+    const s = Math.min(1, Math.max(0, x));
+    return s * s * (3 - 2 * s);
+  }
 
   function update(dt, t) {
     inner.rotation.y += dt * 0.5;
     group.rotation.y += dt * 0.18;
 
-    // Ping-pongs along the (tilted) scan axis — sin, not a sawtooth, for a
-    // smooth continuous idle loop with no hard reset, matching this
-    // project's other idle animations (blink, bob, flicker, flutter).
-    const bandCenter = Math.sin(t * 1.1 + scanPhase) * SCAN_RANGE;
+    // One-directional bottom->top pass, not a ping-pong: `progress` runs
+    // 0->1 over SCAN_CYCLE seconds then wraps straight back to 0, and an
+    // envelope fades the whole band in near progress=0 and out near
+    // progress=1, so it visibly appears at the bottom, sweeps up, and
+    // disappears at the top rather than reversing direction.
+    const progress = ((t + scanPhase) % SCAN_CYCLE) / SCAN_CYCLE;
+    const bandCenter = -SCAN_RANGE + progress * (2 * SCAN_RANGE);
+    const envelope = Math.min(smooth01(progress / SCAN_FADE_FRAC), smooth01((1 - progress) / SCAN_FADE_FRAC));
     let maxIntensity = 0;
     for (let i = 0; i < outerCount; i++) {
       const dist = axisProj[i] - bandCenter;
       const raw = Math.exp(-(dist * dist) / (2 * SCAN_SIGMA * SCAN_SIGMA));
-      const intensity = Math.pow(raw, SCAN_SHARPNESS);
+      const intensity = Math.pow(raw, SCAN_SHARPNESS) * envelope;
       if (intensity > maxIntensity) maxIntensity = intensity;
       c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2]).lerp(scanColor, intensity);
       liveColors[i * 3] = c.r;
