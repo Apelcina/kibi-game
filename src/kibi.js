@@ -33,10 +33,17 @@ const HEAD_RADIUS = 0.38;
 const BODY_Y = BODY_RADIUS * 0.85; // body center height; squash keeps its base near the ground
 const HEAD_Y = 0.58; // overlaps the body for a chibi read, but leaves the body's
                       // sides/bottom clear so age-2 limbs have somewhere to attach
-const ARM_BASE_SCALE = [1, 0.8, 0.95];
-const LEG_BASE_SCALE = [0.82, 0.68, 1.05];
+// Z (3rd component) is the forward/back axis — bumped up from the original
+// 0.95/1.05 so arms/legs reach further (per feedback: "too stubby, he
+// couldn't reach anything"). The matching mesh.position.z offset applied in
+// makeLimb() below keeps the BACK edge where it was and puts all of that
+// added length on the front, so it reads as reaching forward rather than
+// just growing symmetrically in place.
+const ARM_BASE_SCALE = [1, 0.8, 1.15];
+const LEG_BASE_SCALE = [0.82, 0.68, 1.25];
 const ARM_PIVOT_BASE = [0.22, 0.27, 0.15];
 const LEG_PIVOT_BASE = [0.14, 0.06, 0.11];
+const ARM_RADIUS = 0.12; // must match armGeo's IcosahedronGeometry radius below
 const LEG_RADIUS = 0.13; // must match legGeo's IcosahedronGeometry radius below —
                           // used to solve for the leg pivot Y that keeps feet planted
 
@@ -302,24 +309,41 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
   let armL, armR, legL, legR, armMeshL, armMeshR, legMeshL, legMeshR;
   if (age >= 2) {
     const limbMat = track(lowPolyMaterial(0xffffff, { vertexColors: true }));
-    const armGeo = track(new THREE.IcosahedronGeometry(0.12, 1));
+    const armGeo = track(new THREE.IcosahedronGeometry(ARM_RADIUS, 1));
     const legGeo = track(new THREE.IcosahedronGeometry(LEG_RADIUS, 2));
 
-    function makeLimb(geo, pivotPos, scale) {
+    // meshOffset shifts the mesh WITHIN its pivot's local space — the pivot
+    // itself (the swing/rotation center) never moves. Two things use this:
+    //  - forward reach: since ARM/LEG_BASE_SCALE's z got bigger, offsetting
+    //    the mesh forward by the added half-length keeps the BACK edge
+    //    where it was and puts the growth entirely on the front.
+    //  - leg ankle fix (per feedback): the leg pivot used to sit at the
+    //    mesh's own geometric center, so swinging it just tumbled the whole
+    //    blob in place around its middle rather than hinging like a real
+    //    joint. Shifting the leg mesh down-and-forward moves the EFFECTIVE
+    //    pivot to the back-top of the leg blob (an "ankle" the leg hangs
+    //    from) instead of dead center.
+    function makeLimb(geo, pivotPos, scale, meshOffset = [0, 0, 0]) {
       const pivot = new THREE.Group();
       pivot.position.set(...pivotPos);
       const mesh = new THREE.Mesh(geo, limbMat);
       mesh.scale.set(...scale);
+      mesh.position.set(...meshOffset);
       pivot.add(mesh);
       group.add(pivot);
       limbs.push(mesh);
       return { pivot, mesh };
     }
 
-    const armSideL = makeLimb(armGeo, ARM_PIVOT_BASE, ARM_BASE_SCALE);
-    const armSideR = makeLimb(armGeo, [-ARM_PIVOT_BASE[0], ARM_PIVOT_BASE[1], ARM_PIVOT_BASE[2]], ARM_BASE_SCALE);
-    const legSideL = makeLimb(legGeo, LEG_PIVOT_BASE, LEG_BASE_SCALE);
-    const legSideR = makeLimb(legGeo, [-LEG_PIVOT_BASE[0], LEG_PIVOT_BASE[1], LEG_PIVOT_BASE[2]], LEG_BASE_SCALE);
+    const armForwardOffset = ARM_RADIUS * (ARM_BASE_SCALE[2] - 0.95);
+    const armMeshOffset = [0, 0, armForwardOffset];
+    const legForwardOffset = LEG_RADIUS * (LEG_BASE_SCALE[2] - 1.05);
+    const legMeshOffset = [0, -0.035, 0.02 + legForwardOffset];
+
+    const armSideL = makeLimb(armGeo, ARM_PIVOT_BASE, ARM_BASE_SCALE, armMeshOffset);
+    const armSideR = makeLimb(armGeo, [-ARM_PIVOT_BASE[0], ARM_PIVOT_BASE[1], ARM_PIVOT_BASE[2]], ARM_BASE_SCALE, armMeshOffset);
+    const legSideL = makeLimb(legGeo, LEG_PIVOT_BASE, LEG_BASE_SCALE, legMeshOffset);
+    const legSideR = makeLimb(legGeo, [-LEG_PIVOT_BASE[0], LEG_PIVOT_BASE[1], LEG_PIVOT_BASE[2]], LEG_BASE_SCALE, legMeshOffset);
     armL = armSideL.pivot; armR = armSideR.pivot;
     armMeshL = armSideL.mesh; armMeshR = armSideR.mesh;
     legL = legSideL.pivot; legR = legSideR.pivot;
@@ -793,12 +817,17 @@ export function createKibi({ age = 1, shape = 'sphere' } = {}) {
       group.position.y = -landing * 0.018;
       group.position.x = 0;
     } else {
-      // idle bob
-      group.position.y = Math.sin(t * 1.6) * 0.035;
+      // Feet stay planted at all times — a previous version bobbed the
+      // whole group vertically here, which visibly lifted the feet off the
+      // ground while idle (per feedback). A gentle breathing SCALE pulse
+      // gives idle some life instead, without moving anything in world
+      // space; while walking, the footfall bounce below (tied to the
+      // actual gait phase) is the only vertical motion.
+      group.position.y = 0;
       group.rotation.y = Math.sin(t * 0.5) * 0.12;
       group.position.x = 0;
       group.rotation.z = 0;
-      group.scale.y = 1;
+      group.scale.y = moving ? 1 : 1 + Math.sin(t * 1.8) * 0.015;
     }
 
     // blink
