@@ -42,7 +42,7 @@ export function createCollectionOrb(element) {
   const darkColor = baseColor.clone().multiplyScalar(0.55);
   const lightColor = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.45);
   const accentColor = new THREE.Color(info.accent);
-  const scanColor = lightColor.clone().lerp(new THREE.Color(0xffffff), 0.7);
+  const scanColor = new THREE.Color(0xffffff);
 
   // --- outer shell: semi-transparent, dark(bottom)->light(top) gradient, --
   // plus a live glow band blended into these same per-vertex colors (see
@@ -91,7 +91,7 @@ export function createCollectionOrb(element) {
     vertexColors: true,
     flatShading: true,
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.48,
     roughness: 0.2,
     metalness: 0.05,
     emissive: baseColor,
@@ -137,7 +137,9 @@ export function createCollectionOrb(element) {
 
   const scanPhase = Math.random() * Math.PI * 2; // stagger multiple orbs so their scans don't sync up
   const SCAN_RANGE = OUTER_RADIUS * 0.95; // stay just inside the poles along scanAxis
-  const SCAN_SIGMA = OUTER_RADIUS * 0.32; // glow band width (soft falloff, not a hard edge)
+  const SCAN_SIGMA = OUTER_RADIUS * 0.16; // glow band width — narrow enough to read as a
+                                           // distinct passing band, not a wide wash that
+                                           // just blends into the gradient's own light end
   const c = new THREE.Color();
 
   function update(dt, t) {
@@ -147,21 +149,23 @@ export function createCollectionOrb(element) {
     // Ping-pongs along the (tilted) scan axis — sin, not a sawtooth, for a
     // smooth continuous idle loop with no hard reset, matching this
     // project's other idle animations (blink, bob, flicker, flutter).
-    const bandCenter = Math.sin(t * 0.8 + scanPhase) * SCAN_RANGE;
+    const bandCenter = Math.sin(t * 1.1 + scanPhase) * SCAN_RANGE;
     let maxIntensity = 0;
     for (let i = 0; i < outerCount; i++) {
       const dist = axisProj[i] - bandCenter;
       const intensity = Math.exp(-(dist * dist) / (2 * SCAN_SIGMA * SCAN_SIGMA));
       if (intensity > maxIntensity) maxIntensity = intensity;
-      c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2]).lerp(scanColor, intensity * 0.8);
+      c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2]).lerp(scanColor, intensity);
       liveColors[i * 3] = c.r;
       liveColors[i * 3 + 1] = c.g;
       liveColors[i * 3 + 2] = c.b;
     }
     outerGeo.attributes.color.needsUpdate = true;
-    // The whole shell brightens a touch as the band passes through it,
-    // reinforcing that this is light catching the surface, not a decal.
-    outerMat.emissiveIntensity = 0.12 + maxIntensity * 0.35;
+    // The whole shell brightens as the band passes through it, reinforcing
+    // that this is light catching the surface, not a decal — pushed harder
+    // than before since the low shell opacity was washing out a subtler
+    // pulse against the sky background.
+    outerMat.emissiveIntensity = 0.12 + maxIntensity * 0.7;
   }
 
   function dispose() {
